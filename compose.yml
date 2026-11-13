@@ -1,10 +1,10 @@
 services:
   foxtunes:
-    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.0}
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.1}
     restart: unless-stopped
     init: true
     ports:
-      - "${FOXTUNES_BIND_IP:-127.0.0.1}:${FOXTUNES_PORT:-8787}:8787"
+      - "${FOXTUNES_BIND_IP:-127.0.0.1}:${FOXTUNES_PORT:-8863}:8863"
       # Only for optional CLI OAuth via an SSH loopback tunnel.
       - "127.0.0.1:8765:8765"
     environment:

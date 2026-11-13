@@ -17,10 +17,10 @@ Download `compose.yml` and `.env.example` from the private repository into a ser
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.0
+FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.1
 FOXTUNES_PUBLIC_URL=http://foxtunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
-FOXTUNES_PORT=8787
+FOXTUNES_PORT=8863
 ```
 
 Replace `192.168.1.50` with the Docker host's LAN IP. If Nginx runs directly on that host, use `127.0.0.1` instead. A separate Nginx Proxy Manager container cannot reach the host's loopback address as its upstream. Restrict the backend port to your trusted LAN/proxy; do not expose it on your router.
@@ -49,7 +49,7 @@ Create a Proxy Host:
 - Domain: `foxtunes.nate`
 - Forward scheme: `http`
 - Forward hostname/IP: Docker host's LAN IP
-- Forward port: `8787`
+- Forward port: `8863`
 - Preserve the original Host header (the normal proxy behavior).
 - WebSockets are not required; this version uses HTTP polling.
 
@@ -132,4 +132,4 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.0` tag publishes `ghcr.io/natsteff/foxtunes:0.1.0` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.1` tag publishes `ghcr.io/natsteff/foxtunes:0.1.1` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.

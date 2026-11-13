@@ -79,9 +79,9 @@ Start the web test on the computer where the host Spotify login was saved:
 python3 web_server.py
 ```
 
-Open **http://127.0.0.1:8787** for the guest interface. Search songs/artists, page through results, request tracks and vote. Guests have no playback, device-selection or removal permission. One vote per browser session per request; ties keep request order. Each session can have three waiting requests. Sessions expire after eight hours and are not permanent identities; clearing cookies can create a new session, so this is a trusted-party prototype rather than strong abuse prevention.
+Open **http://127.0.0.1:8863** for the guest interface. Search songs/artists, page through results, request tracks and vote. Guests have no playback, device-selection or removal permission. One vote per browser session per request; ties keep request order. Each session can have three waiting requests. Sessions expire after eight hours and are not permanent identities; clearing cookies can create a new session, so this is a trusted-party prototype rather than strong abuse prevention.
 
-Host page: **http://127.0.0.1:8787/host**. The first launch generates a private host password. Read it locally:
+Host page: **http://127.0.0.1:8863/host**. The first launch generates a private host password. Read it locally:
 
 ```sh
 python3 -c 'import json; print(json.load(open(".local-work/runtime/web-host.json"))["password"])'
@@ -101,6 +101,6 @@ Stop the loopback server first. Replace the sample IP with this computer's actua
 python3 web_server.py --bind 0.0.0.0 --lan-host 192.168.1.50
 ```
 
-Phones on the same network open **http://192.168.1.50:8787**. Bind only for a deliberate LAN test; do not forward the port to the internet. Plain HTTP is for the trusted-LAN experiment: host passwords and session traffic are not encrypted. Prefer host sign-in through loopback on the server computer. Guest isolation/router settings may prevent phones from reaching it. HTTPS, PWA installation, QR access, Docker deployment and dedicated-player setup remain separate steps; no public hosting is configured.
+Phones on the same network open **http://192.168.1.50:8863**. Bind only for a deliberate LAN test; do not forward the port to the internet. Plain HTTP is for the trusted-LAN experiment: host passwords and session traffic are not encrypted. Prefer host sign-in through loopback on the server computer. Guest isolation/router settings may prevent phones from reaching it. HTTPS, PWA installation, QR access, Docker deployment and dedicated-player setup remain separate steps; no public hosting is configured.
 
 The web prototype uses its own `web.sqlite3` so earlier CLI experiments remain intact. Run one server instance per database; in-process session/worker locks are not a multi-process deployment design. Server restarts retain requests/votes but expire browser sessions and disable handoff. Stop with Control-C. Leave the CLI idle while the browser server uses the same Spotify credentials to avoid concurrent refresh operations.

@@ -4,7 +4,7 @@ server {
     listen 80;
     server_name foxtunes.nate;
     location / {
-        proxy_pass http://192.168.1.50:8787;
+        proxy_pass http://192.168.1.50:8863;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

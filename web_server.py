@@ -377,7 +377,7 @@ def handler(app):
     return Handler
 
 
-def make_server(app, bind='127.0.0.1', port=8787, allowed=None):
+def make_server(app, bind='127.0.0.1', port=8863, allowed=None):
     server = http.server.ThreadingHTTPServer((bind, port), handler(app))
     server.daemon_threads = True
     actual = server.server_address[1]
@@ -388,7 +388,7 @@ def make_server(app, bind='127.0.0.1', port=8787, allowed=None):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bind', default='127.0.0.1')
-    parser.add_argument('--port', type=int, default=8787)
+    parser.add_argument('--port', type=int, default=8863)
     parser.add_argument('--lan-host', help='LAN IP used in browser URLs, required for LAN binding')
     args = parser.parse_args()
     if args.bind != '127.0.0.1' and not args.lan_host and not os.environ.get('FOXTUNES_PUBLIC_URL'):

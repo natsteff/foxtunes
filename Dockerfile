@@ -6,6 +6,6 @@ COPY foxtunes.py web_server.py ./
 COPY web/ ./web/
 USER 10001:10001
 VOLUME ["/data"]
-EXPOSE 8787
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3)"
+EXPOSE 8863
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8863/healthz', timeout=3)"
 CMD ["python", "web_server.py", "--bind", "0.0.0.0"]
