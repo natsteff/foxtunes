@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="web/foxtunes-logo.png" alt="UnicornTunes" width="600">
+</p>
+
 # UnicornTunes
 
 **Docker Compose deployment:** see [DEPLOY.md](DEPLOY.md) for the private image, Nginx Proxy Manager, persistent data and server-side Spotify sign-in.
