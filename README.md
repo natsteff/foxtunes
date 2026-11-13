@@ -116,3 +116,7 @@ On the host desk, select the paired, online Soloist/Connect device and click **S
 ## Share the guest page
 
 The header's **Show QR code** button opens a scannable link to the installation's guest page, using `FOXTUNES_PUBLIC_URL` (for example, `http://foxtunes.nate/`). It never includes a host session, password, token or `/host` path. QR rendering runs locally using vendored QRCode.js; no external QR service is called. Guest devices must be able to resolve and reach that address. The supplied UnicornTunes header artwork is used while application, deployment and repository names remain FoxTunes.
+
+## Repository name
+
+Source: [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes). Deployments may use `/opt/unicorntunes`; the Compose project remains explicitly `foxtunes` to preserve existing containers and data. Application settings retain the FOXTUNES_* namespace and the guest URL remains configurable (including foxtunes.nate). See the directory-rename instructions in [DEPLOY.md](DEPLOY.md).

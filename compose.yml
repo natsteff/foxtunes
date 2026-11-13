@@ -1,6 +1,9 @@
+# Retain existing container/network/volume identity when the checkout is renamed.
+name: foxtunes
+
 services:
   foxtunes:
-    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.6}
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/unicorntunes:0.1.7}
     restart: unless-stopped
     init: true
     ports:

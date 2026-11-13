@@ -13,11 +13,11 @@ Use one FoxTunes container per data volume. Separate installations need separate
 
 ## Install
 
-Download `compose.yml` and `.env.example` from the private repository into a server directory. Copy `.env.example` to `.env` and edit:
+Download `compose.yml` and `.env.example` from [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes) into a server directory such as `/opt/unicorntunes`. Copy `.env.example` to `.env` and edit:
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.6
+FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.7
 FOXTUNES_PUBLIC_URL=http://foxtunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -25,7 +25,7 @@ FOXTUNES_PORT=8863
 
 Replace `192.168.1.50` with the Docker host's LAN IP. If Nginx runs directly on that host, use `127.0.0.1` instead. A separate Nginx Proxy Manager container cannot reach the host's loopback address as its upstream. Restrict the backend port to your trusted LAN/proxy; do not expose it on your router.
 
-The image is private. Authenticate the Docker server to GHCR using a GitHub personal access token (classic) with `read:packages` and package access. Enter it at the password prompt; do not put it in Compose or `.env`:
+GHCR package visibility is separate from the public source repository. If the image is private, authenticate the Docker server to GHCR using a GitHub personal access token (classic) with `read:packages` and package access. Enter it at the password prompt; do not put it in Compose or `.env`:
 
 ```sh
 docker login ghcr.io -u YOUR_GITHUB_USERNAME
@@ -40,7 +40,7 @@ GitHub's [registry authentication guide](https://docs.github.com/en/packages/wor
 docker compose -f compose.yml -f compose.build.yml up -d --build
 ```
 
-This path needs access to the private source repository but not to the GHCR image. For subsequent local-build operations, continue using both Compose files.
+The source repository is public; this local-build path requires no GitHub login or GHCR image access. For subsequent local-build operations, continue using both Compose files.
 
 ## Nginx Proxy Manager
 
@@ -134,4 +134,21 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.6` tag publishes `ghcr.io/natsteff/foxtunes:0.1.6` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.7` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.7` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+
+## Existing installation: repository / directory rename
+
+The repository is now `https://github.com/natsteff/unicorntunes`. A directory rename must retain the existing Compose project identity. The supplied Compose file explicitly sets `name: foxtunes`, preserving the original `foxtunes-foxtunes-1` container and `foxtunes_foxtunes_data` volume regardless of the checkout directory name. Service/volume keys, FOXTUNES_* settings and foxtunes.nate are retained for compatibility. Changing repository/image names does not migrate or erase runtime data.
+
+After moving the checkout to `/opt/unicorntunes` yourself, run:
+
+```sh
+cd /opt/unicorntunes
+git remote set-url origin https://github.com/natsteff/unicorntunes.git
+git pull --ff-only
+sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.7|' .env
+docker compose -f compose.yml -f compose.build.yml config --volumes
+docker compose -f compose.yml -f compose.build.yml up -d --build
+```
+
+Keep the existing `.env` and volume. Do not run `down -v`. If a shell or `.env` already sets `COMPOSE_PROJECT_NAME`, it overrides the file: ensure it is `foxtunes` for this existing installation. Do not use `-p unicorntunes` with the existing data. A separate future installation can intentionally use a different `-p` project with its own data. The old GHCR package is not renamed or removed; this release publishes to the new `unicorntunes` image path. Existing `.env` files must update FOXTUNES_IMAGE explicitly, because they override the Compose default.
