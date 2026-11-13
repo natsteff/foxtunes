@@ -382,3 +382,25 @@ class SkipRequestTests(unittest.TestCase):
         with patch.object(w.time,'sleep'),self.assertRaises(f.Failure):self.app.skip_request()
         self.assertFalse(self.app.enabled)
         self.assertEqual(self.app.queue('')[0]['state'],'uncertain')
+
+class ShareTests(unittest.TestCase):
+    def test_share_uses_server_origin_without_host_path_or_credentials(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app=w.App(Path(temp),FakeSpotify())
+            app.public_url='http://foxtunes.nate'
+            server=w.make_server(app,port=0)
+            thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+            base='http://127.0.0.1:'+str(server.server_address[1])
+            try:
+                with urllib.request.urlopen(base+'/api/share') as response:
+                    payload=json.load(response)
+                    self.assertEqual(payload,{'url':'http://foxtunes.nate/'})
+                    self.assertNotIn(app.password,json.dumps(payload))
+                with urllib.request.urlopen(base+'/vendor/qrcode.min.js') as response:
+                    self.assertEqual(response.headers.get_content_type(),'text/javascript')
+                    response.read()
+                with urllib.request.urlopen(base+'/foxtunes-logo.png') as response:
+                    self.assertEqual(response.headers.get_content_type(),'image/png')
+                    response.read()
+            finally:
+                server.shutdown();server.server_close();thread.join();app.db.close()

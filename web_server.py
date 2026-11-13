@@ -417,7 +417,7 @@ def handler(app):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
             if cookie:
                 self.send_header('Set-Cookie', 'ft_session=' + cookie + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800' + ('; Secure' if app.public_url.startswith('https://') else ''))
             self.end_headers()
@@ -462,12 +462,14 @@ def handler(app):
                             app.oauth_finish(session, query)
                             self.respond(200, b'<!doctype html><title>FoxTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
                             return
-                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png'):
-                            name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png'}[parsed.path]
-                            content = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png'}[name]
+                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js'):
+                            name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
+                            content = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png', 'vendor/qrcode.min.js': 'text/javascript'}[name]
                             self.respond(200, (Path(__file__).parent / 'web' / name).read_bytes(), content, sid)
                             return
-                        if parsed.path == '/api/state':
+                        if parsed.path == '/api/share':
+                            payload = {'url': (app.public_url or 'http://' + host) + '/'}
+                        elif parsed.path == '/api/state':
                             payload = {'csrf': session['csrf'], 'host': session['host'], 'now': app.now,
                                        'queue': app.queue(sid), 'accepting': app.accepting, 'enabled': app.enabled,
                                        'error': app.error, 'updated': app.updated, 'handoff': app.health()}

@@ -27,3 +27,6 @@ $('refreshdevices').onclick=()=>loadDevices();
 for(const action of ['pause','skip'])$(action).onclick=async()=>{if(!confirm(action==='pause'?'Pause the selected playback device?':'Skip to the next FoxTunes request? If none is waiting, Spotify advances normally.'))return;try{await api('/api/host/'+action,{});await refresh();message(action==='skip'?'Next track verified.':'Playback paused. Automatic handoff stopped.');}catch(e){message(e.message);}};
 $('logout').onclick=async()=>{await api('/api/host/logout',{});devicesLoaded=false;await refresh();};
 refresh();setInterval(refresh,5000);
+
+$('show-qr').onclick=async()=>{try{const share=await api('/api/share');const url=new URL(share.url);if(!['http:','https:'].includes(url.protocol))throw Error('Invalid server URL.');$('share-url').textContent=url.href;$('share-url').href=url.href;$('qrcode').replaceChildren();new QRCode($('qrcode'),{text:url.href,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});$('share-dialog').showModal();}catch(e){message(e.message);}};
+$('close-share').onclick=()=>$('share-dialog').close();

@@ -17,7 +17,7 @@ Download `compose.yml` and `.env.example` from the private repository into a ser
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.4
+FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.5
 FOXTUNES_PUBLIC_URL=http://foxtunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -134,4 +134,4 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.4` tag publishes `ghcr.io/natsteff/foxtunes:0.1.4` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.5` tag publishes `ghcr.io/natsteff/foxtunes:0.1.5` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.

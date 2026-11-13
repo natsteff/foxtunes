@@ -112,3 +112,7 @@ On the host desk, select the paired, online Soloist/Connect device and click **S
 ## Queue-aware host skip and mobile feedback (v0.1.3+)
 
 **Skip to next request** immediately starts the next FoxTunes request in vote order. Already-handed-off requests are locked ahead of waiting requests and are advanced to without re-queueing them. With no pending requests, Spotify advances normally. Successful skip preserves a running session; failed or uncertain playback confirmation stops handoff for reconciliation. Guests cannot invoke this action. Mobile shows now playing and coming up before search. Request buttons show Adding… while saving and ✓ Requested after success, with a visible confirmation and an updated queue.
+
+## Share the guest page
+
+The header's **Show QR code** button opens a scannable link to the installation's guest page, using `FOXTUNES_PUBLIC_URL` (for example, `http://foxtunes.nate/`). It never includes a host session, password, token or `/host` path. QR rendering runs locally using vendored QRCode.js; no external QR service is called. Guest devices must be able to resolve and reach that address. The supplied UnicornTunes header artwork is used while application, deployment and repository names remain FoxTunes.
