@@ -462,9 +462,9 @@ def handler(app):
                             app.oauth_finish(session, query)
                             self.respond(200, b'<!doctype html><title>FoxTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
                             return
-                        if parsed.path in ('/', '/host', '/app.js', '/style.css'):
-                            name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css'}[parsed.path]
-                            content = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css'}[name]
+                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png'):
+                            name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png'}[parsed.path]
+                            content = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png'}[name]
                             self.respond(200, (Path(__file__).parent / 'web' / name).read_bytes(), content, sid)
                             return
                         if parsed.path == '/api/state':
