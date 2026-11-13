@@ -159,6 +159,11 @@ class WebTests(unittest.TestCase):
             self.assertNotIn('access_token', encoded)
             request(clients[0], '/api/host/login', {'password': self.app.password}, states[0]['csrf'])
             self.assertTrue(request(clients[0], '/api/state')['host'])
+            self.assertFalse(request(clients[0], '/api/search?q=test')['items'][0]['house_favorite'])
+            request(clients[0], '/api/host/favorite', {'uri': A}, states[0]['csrf'])
+            self.assertTrue(request(clients[0], '/api/search?q=test')['items'][0]['house_favorite'])
+            request(clients[0], '/api/host/favorite', {'uri': A, 'remove': True}, states[0]['csrf'])
+            self.assertFalse(request(clients[0], '/api/search?q=test')['items'][0]['house_favorite'])
             self.assertFalse(request(clients[1], '/api/state')['host'])
         finally:
             server.shutdown()

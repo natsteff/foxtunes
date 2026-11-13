@@ -525,6 +525,7 @@ def handler(app):
                             if len(app.catalog) > 2000:
                                 app.catalog.clear()
                             for item in items:
+                                item['house_favorite'] = bool(app.db.execute('SELECT 1 FROM favorites WHERE uri=?', (item['uri'],)).fetchone())
                                 app.catalog[item['uri']] = item
                             payload = {'items': items, 'more': bool(result.get('next')) and offset < 990, 'offset': offset}
                         elif parsed.path == '/api/host/devices':
