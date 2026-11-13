@@ -23,7 +23,35 @@ def track(item):
             'artists': ', '.join(a['name'] for a in item.get('artists', [])),
             'art': next((i['url'] for i in (item.get('album') or {}).get('images', [])[-1:]), ''),
             'url': (item.get('external_urls') or {}).get('spotify', ''),
-            'duration_ms': item.get('duration_ms', 0)}
+            'duration_ms': item.get('duration_ms', 0),
+            'album': (item.get('album') or {}).get('name', ''),
+            'year': (item.get('album') or {}).get('release_date', '')[:4]}
+
+
+def search_options(query):
+    text = query.get('q', [''])[0].strip()
+    if len(text) > 150:
+        raise ValueError('Search text must be at most 150 characters.')
+    parts = [text] if text else []
+    for field in ('track', 'artist', 'album'):
+        value = query.get(field, [''])[0].strip()
+        if len(value) > 150 or any(c in value for c in ('"', '\\')):
+            raise ValueError('Search fields must be at most 150 characters without quotes or backslashes.')
+        if value:
+            parts.append(field + ':"' + value + '"')
+    year = query.get('year', [''])[0].strip()
+    if year:
+        bounds = year.split('-')
+        if len(bounds) > 2 or any(len(y) != 4 or not y.isascii() or not y.isdigit() for y in bounds) or bounds[0] > bounds[-1]:
+            raise ValueError('Use a year like 2005 or a range like 2000-2009.')
+        parts.append('year:' + year)
+    exact = query.get('exact', ['0'])[0] == '1'
+    title = query.get('track', [''])[0].strip()
+    if exact and not title:
+        raise ValueError('Enter a song title to use exact title matching.')
+    if not parts:
+        raise ValueError('Enter search text or at least one search option.')
+    return ' '.join(parts), title.casefold() if exact else None
 
 
 class App:
@@ -479,18 +507,19 @@ def handler(app):
                         elif parsed.path == '/api/search':
                             app.limit(('search', sid), 15)
                             app.limit(('search-ip', self.client_address[0]), 60)
-                            text = query.get('q', [''])[0].strip()
+                            text, exact_title = search_options(query)
                             offset = int(query.get('offset', ['0'])[0])
-                            if not 1 <= len(text) <= 150 or not 0 <= offset <= 990:
-                                raise ValueError('Enter a search of 1–150 characters.')
+                            if not 0 <= offset <= 990:
+                                raise ValueError('Invalid search page.')
                             result = app.api.call('/search', params={'q': text, 'type': 'track', 'limit': 10, 'offset': offset}).get('tracks', {})
-                            items = [track(t) for t in result.get('items', [])]
+                            items = [track(t) for t in result.get('items', [])
+                                     if exact_title is None or t.get('name', '').strip().casefold() == exact_title]
                             # Bounded in-memory catalog; metadata always comes from Spotify, never guest HTML.
                             if len(app.catalog) > 2000:
                                 app.catalog.clear()
                             for item in items:
                                 app.catalog[item['uri']] = item
-                            payload = {'items': items, 'more': bool(result.get('next')), 'offset': offset}
+                            payload = {'items': items, 'more': bool(result.get('next')) and offset < 990, 'offset': offset}
                         elif parsed.path == '/api/host/devices':
                             if not session['host']:
                                 raise PermissionError('Host access required.')

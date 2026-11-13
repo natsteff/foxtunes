@@ -142,6 +142,14 @@ class WebTests(unittest.TestCase):
             self.assertEqual(forbidden.exception.code, 403)
             request(clients[0], '/api/search?q=test&offset=10')
             self.assertEqual(self.api.calls[-1][2]['offset'], 10)
+            from urllib.parse import urlencode
+            options = urlencode({'track': '<SCRIPT>safe text</SCRIPT>', 'artist': 'Example', 'year': '2000-2009', 'exact': '1'})
+            exact = request(clients[0], '/api/search?' + options)
+            self.assertEqual(len(exact['items']), 1)
+            self.assertIn('year:2000-2009', self.api.calls[-1][2]['q'])
+            no_match = request(clients[0], '/api/search?track=Different&exact=1')
+            self.assertEqual(no_match['items'], [])
+            self.assertTrue(no_match['more'])
             visible = request(clients[1], '/api/state')
             self.assertEqual(len(visible['queue']), 3)
             self.assertEqual(visible['queue'][0]['votes'], 1)
@@ -404,3 +412,21 @@ class ShareTests(unittest.TestCase):
                     response.read()
             finally:
                 server.shutdown();server.server_close();thread.join();app.db.close()
+
+
+class SearchOptionsTests(unittest.TestCase):
+    def test_combined_filters_and_exact_title(self):
+        query = {k: [v] for k, v in {'track': 'Through Struggle', 'artist': 'As I Lay Dying', 'album': 'Shadows Are Security', 'year': '2005', 'exact': '1'}.items()}
+        text, exact = w.search_options(query)
+        self.assertEqual(text, 'track:"Through Struggle" artist:"As I Lay Dying" album:"Shadows Are Security" year:2005')
+        self.assertEqual(exact, 'through struggle')
+
+    def test_invalid_filters(self):
+        for query in ({}, {'year': ['2009-2000']}, {'year': ['20xx']}, {'exact': ['1'], 'q': ['song']}, {'artist': ['bad"field']}, {'q': ['x' * 151]}):
+            with self.subTest(query=query), self.assertRaises(ValueError):
+                w.search_options(query)
+
+    def test_album_metadata_and_missing_album(self):
+        song = w.track({'album': {'name': 'Example', 'release_date': '2005-06-14'}})
+        self.assertEqual((song['album'], song['year']), ('Example', '2005'))
+        self.assertEqual(w.track({})['year'], '')
