@@ -66,9 +66,9 @@ Inspect journal messages locally, then review/redact before sharing. Empty filte
 
 ## Optional local-file player: trial procedure
 
-**Status: MPD installation, indexing and audible playback have been tested on the trial device. Reboot behavior and coordinated Spotify/local playback remain unverified.**
+**Status: MPD installation, indexing and audible playback have been tested on the trial device. Reboot behavior and audible coordinated Spotify/local playback remain unverified; mixed-source coordination is implemented and covered by automated tests.**
 
-The next stage is the [Docker-to-player connection trial](LOCAL_FILES.md), using host desk settings and a restricted SSH key.
+Follow the [local playback guide](LOCAL_FILES.md) for host desk connection settings, the restricted SSH key and mixed playback testing.
 
 For a small library, designate a folder under the service user's home:
 

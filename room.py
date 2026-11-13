@@ -181,12 +181,19 @@ class RoomFeatures:
                 raise f.Failure('This song was played recently. Try another favorite.')
 
     def submit(self, sid, uri):
-        if not f.TRACK.fullmatch(str(uri)):
-            raise f.Failure('Local files cannot be requested until playback support is verified.')
+        from local_player import LOCAL
+        local = bool(LOCAL.fullmatch(str(uri)))
+        if not f.TRACK.fullmatch(str(uri)) and not local:
+            raise f.Failure('This track cannot be requested.')
+        if local and not self.local_bound():
+            raise f.Failure('The host must enable local playback for this room first.')
         if not self.accepting:
             raise f.Failure('The host has paused new requests.')
         favorite = self.db.execute('SELECT metadata FROM favorites WHERE uri=?', (uri,)).fetchone()
         song = self.catalog.get(uri) or (json.loads(favorite[0]) if favorite else None)
+        if local:
+            indexed = self.db.execute('SELECT metadata FROM local_tracks WHERE uri=?', (uri,)).fetchone()
+            song = json.loads(indexed[0]) if indexed else None
         if not song:
             raise f.Failure('Search for this track first.')
         self.check_rules(song)
@@ -217,7 +224,7 @@ class RoomFeatures:
         now = time.time()
         item = state.get('item') or {}
         uri = item.get('uri')
-        if uri and not uri.startswith('spotify:track:'):
+        if uri and not uri.startswith(('spotify:track:', 'local:')):
             uri = None
         progress = state.get('progress_ms') or 0
         device = (state.get('device') or {}).get('id')

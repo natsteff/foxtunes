@@ -21,6 +21,8 @@ from local_player import LocalPlayback
 
 
 def track(item):
+    if item.get('source') == 'local':
+        return dict(item)
     return {'uri': item.get('uri'), 'name': item.get('name') or 'Unknown track',
             'artists': ', '.join(a.get('name') or 'Unknown artist' for a in (item.get('artists') or [])),
             'art': next((i['url'] for i in ((item.get('album') or {}).get('images') or [])[-1:]), ''),
@@ -132,7 +134,7 @@ class App(RoomFeatures, LocalPlayback):
             self.idle_ready = False
             return
         if self.idle_ready:
-            if item.get('uri') and item.get('uri') != previous.get('uri'):
+            if previous.get('source') != 'local' and item.get('uri') and item.get('uri') != previous.get('uri'):
                 self.idle_ready = False
             return
         duration = previous.get('duration_ms') or 0
@@ -151,7 +153,11 @@ class App(RoomFeatures, LocalPlayback):
             self.db.commit()
 
     def start_idle_request(self, row):
+        if row['uri'].startswith('local:'):
+            return self.start_local_request(row, self.api.call('/me/player'))
         self.check_rules(row)
+        if self.local_bound() and self.local.call('status').get('state') in ('play', 'pause'):
+            raise f.Failure('MPD is still active. Spotify was not started; check the local player.')
         self.commit_selection(row['id'])
         self.idle_ready = False
         try:
@@ -169,6 +175,12 @@ class App(RoomFeatures, LocalPlayback):
             return
         self.next_poll = time.monotonic() + (5 if self.enabled else 20)
         try:
+            if self.local_active:
+                self.poll_local()
+                return
+            previous = self.now or {}
+            previous_updated = self.updated
+            previous_device = getattr(self, 'observed_device', None)
             state = self.api.call('/me/player')
             self.update_idle_state(state)
             self.updated = time.time()
@@ -195,11 +207,25 @@ class App(RoomFeatures, LocalPlayback):
                 if row:
                     self.start_idle_request(row)
                 return
+            next_row = next((r for r in self.queue('') if r['state']=='waiting'), None)
+            remaining = (previous.get('duration_ms') or 0) - (previous.get('progress_ms') or 0)
+            elapsed = time.time() - previous_updated if previous_updated else float('inf')
+            boundary = (previous.get('playing') and previous.get('uri') != item.get('uri')
+                        and previous.get('duration_ms') and 0 <= remaining <= 10000
+                        and 0 <= elapsed <= 20 and elapsed + 1 >= remaining / 1000
+                        and previous_device == self.device)
+            if next_row and next_row['uri'].startswith('local:') and boundary:
+                self.start_local_request(next_row, state)
+                return
             if not state.get('is_playing') or not item.get('duration_ms') or item['duration_ms'] - (state.get('progress_ms') or 0) > 15000:
                 return
             rows = self.queue('')
             row = next((r for r in rows if r['state'] == 'waiting'), None)
             if not row:
+                return
+            if row['uri'].startswith('local:'):
+                # Never cut off the Spotify track's tail. Observe its end/boundary first.
+                self.next_poll = time.monotonic() + 1
                 return
             self.check_rules(row)
             self.commit_selection(row['id'])
@@ -261,11 +287,28 @@ class App(RoomFeatures, LocalPlayback):
         self.next_poll = 0
 
     def start_session(self, device, accepting):
+        self.enabled = False
+        if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
+            raise f.Failure('Reconcile the uncertain handoff before starting a session.')
         devices = self.api.call('/me/player/devices').get('devices', [])
         if not any(d.get('id') == device and not d.get('is_restricted') for d in devices):
             raise f.Failure('Player unavailable. Refresh devices and check that Soloist is running.')
-        if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
-            raise f.Failure('Reconcile the uncertain handoff before starting a session.')
+        if self.local_active:
+            self.stop_local_owned()
+        elif self.local_config.get('enabled') and self.local_config.get('device') == device:
+            status = self.local.call('status')
+            if status.get('state') in ('play', 'pause'):
+                raise f.Failure('MPD is active outside this session. Stop it before starting Spotify.')
+        seed_local = next((r for r in self.queue('') if r['state']=='waiting'), None)
+        current = self.api.call('/me/player') if seed_local and seed_local['uri'].startswith('local:') else None
+        if current is not None and not current.get('is_playing'):
+            if self.local_config.get('device') != device:
+                raise f.Failure('Choose the Spotify device linked to the local player.')
+            self.device, self.accepting = device, accepting
+            self.start_local_request(seed_local, current)
+            f.private_write(self.data / 'settings.json', {'device':device,'accepting':accepting})
+            self.enabled, self.error, self.reason, self.next_poll = True, '', '', 0
+            return
         # A remote mutation may change playback even if its response is lost.
         # Stop dispatch until the selected target and playing state are observed.
         self.enabled = False
@@ -290,6 +333,8 @@ class App(RoomFeatures, LocalPlayback):
                         raise f.Failure('Player activated. Request a song in UnicornTunes, then press Start session to begin playback.')
                     if self.db.execute("SELECT id FROM songs WHERE state IN ('accepted','queued')").fetchone():
                         raise f.Failure('An earlier handoff remains unresolved. Reconcile it before starting a new track.')
+                    if seed['uri'].startswith('local:'):
+                        raise f.Failure('Spotify state changed during startup. Start again to begin the local request safely.')
                     self.check_rules(seed)
                     self.commit_selection(seed['id'])
                     self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (seed['id'],))
@@ -332,6 +377,9 @@ class App(RoomFeatures, LocalPlayback):
             raise f.Failure(self.reason)
 
     def skip_request(self):
+        next_local = next((r for r in self.queue('') if r['state']=='waiting'), None)
+        if self.local_active or (next_local and next_local['uri'].startswith('local:')):
+            return self.skip_mixed_request()
         if not self.device:
             raise f.Failure('Start a session on the selected player first.')
         if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
@@ -430,6 +478,8 @@ class App(RoomFeatures, LocalPlayback):
             accepting = bool(body.get('accepting', True))
             enabled = bool(body.get('enabled'))
             device = str(body.get('device', ''))
+            if self.local_active and device != self.device:
+                raise f.Failure('Stop local playback before changing the playback device.')
             devices = self.api.call('/me/player/devices').get('devices', [])
             if not any(d.get('id') == device and not d.get('is_restricted') for d in devices):
                 raise f.Failure('Choose an available unrestricted playback device.')
@@ -459,6 +509,8 @@ class App(RoomFeatures, LocalPlayback):
             row = self.db.execute('SELECT state FROM songs WHERE id=?', (int(body['id']),)).fetchone()
             if not row or row['state'] not in ('uncertain', 'accepted', 'queued'):
                 raise f.Failure('Only an unresolved handoff can be reconciled.')
+            if self.local_active and self.local_active['id'] == int(body['id']):
+                self.stop_local_owned()
             self.enabled = False
             self.reason = 'Handoff stopped after host reconciliation.'
             self.db.execute("UPDATE songs SET state='past', detail=? WHERE id=?",
@@ -473,7 +525,11 @@ class App(RoomFeatures, LocalPlayback):
             self.enabled = False
             self.reason = 'Handoff stopped after host playback control.'
             if route.endswith('pause'):
-                self.api.call('/me/player/pause', 'PUT', params={'device_id': self.device})
+                if self.local_active:
+                    self.owned_local_status()
+                    self.local.call('pause')
+                else:
+                    self.api.call('/me/player/pause', 'PUT', params={'device_id': self.device})
             else:
                 self.api.call('/me/player/next', 'POST', params={'device_id': self.device})
         elif route == '/api/host/logout':
@@ -578,20 +634,7 @@ def handler(app):
                         elif parsed.path == '/api/search':
                             app.limit(('search', sid), 15)
                             app.limit(('search-ip', self.client_address[0]), 60)
-                            text, exact_title = search_options(query)
-                            offset = int(query.get('offset', ['0'])[0])
-                            if not 0 <= offset <= 990:
-                                raise ValueError('Invalid search page.')
-                            result = app.api.call('/search', params={'q': text, 'type': 'track', 'limit': 10, 'offset': offset}).get('tracks', {})
-                            items = [track(t) for t in result.get('items', [])
-                                     if exact_title is None or t.get('name', '').strip().casefold() == exact_title]
-                            # Bounded in-memory catalog; metadata always comes from Spotify, never guest HTML.
-                            if len(app.catalog) > 2000:
-                                app.catalog.clear()
-                            for item in items:
-                                item['house_favorite'] = bool(app.db.execute('SELECT 1 FROM favorites WHERE uri=?', (item['uri'],)).fetchone())
-                                app.catalog[item['uri']] = item
-                            payload = {'items': items, 'more': bool(result.get('next')) and offset < 990, 'offset': offset}
+                            payload = app.mixed_search(query)
                         elif parsed.path == '/api/host/devices':
                             if not session['host']:
                                 raise PermissionError('Host access required.')

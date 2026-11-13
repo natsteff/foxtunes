@@ -43,6 +43,7 @@ class LocalPlayback:
         self.local=RemoteMPD(self.data,self.local_config)
         self.db.execute('CREATE TABLE IF NOT EXISTS local_tracks(uri TEXT PRIMARY KEY,metadata TEXT NOT NULL)')
         self.db.commit()
+        self.local_active=self.meta('local_active')
         self.local_error=''
         self.player_missing=False
 
@@ -94,6 +95,7 @@ class LocalPlayback:
 
     def local_action(self,sid,route,body):
         if route=='/api/host/local-config':
+            if self.local_active:raise f.Failure('Stop or finish local playback before changing its connection.')
             config={'enabled':bool(body.get('enabled')),'host':str(body.get('host','')).strip(),
                     'user':str(body.get('user','')).strip(),'port':int(body.get('port',22)),
                     'device':str(body.get('device','')),'volume':int(body.get('volume',50))}
@@ -108,3 +110,160 @@ class LocalPlayback:
         if route=='/api/host/local-test':return self.local.call('status')
         return None
 
+    def mixed_search(self, query):
+        from web_server import search_options, track
+        offset = int(query.get('offset', ['0'])[0])
+        source = query.get('source', ['all'])[0]
+        if source not in ('all', 'spotify', 'local') or not 0 <= offset <= 990:
+            raise ValueError('Invalid search source or page.')
+        blank = not any(query.get(k, [''])[0].strip() for k in ('q', 'track', 'artist', 'album', 'year'))
+        if blank and source != 'local':
+            raise ValueError('Enter search text, or choose Local files to browse the library.')
+        # Validate filters once for both providers, including exact-title and year syntax.
+        text, exact = search_options(query) if not blank else ('', None)
+        items, more, warning = [], False, ''
+        if source != 'spotify' and self.local_config.get('enabled'):
+            items, more = self.local_search(query, offset)
+        if source != 'local':
+            try:
+                result = self.api.call('/search', params={'q':text,'type':'track','limit':10,'offset':offset}).get('tracks', {})
+                items += [track(t) for t in result.get('items', []) if exact is None or t.get('name', '').strip().casefold() == exact]
+                more = more or bool(result.get('next'))
+            except f.Failure:
+                if not items: raise
+                warning = 'Spotify search is unavailable. Showing matching local files.'
+        if len(self.catalog) > 2000: self.catalog.clear()
+        for song in items:
+            song['house_favorite'] = bool(self.db.execute('SELECT 1 FROM favorites WHERE uri=?', (song['uri'],)).fetchone())
+            self.catalog[song['uri']] = song
+        return {'items':items, 'more':more and offset < 990, 'offset':offset, 'warning':warning}
+
+    def start_local_request(self, row, spotify):
+        if not self.local_bound():
+            raise f.Failure('Local playback is not linked to the selected Spotify device. Save its connection in the host desk.')
+        status = self.local.call('status')
+        if status.get('state') in ('play', 'pause'):
+            raise f.Failure('MPD has another active track. Stop it before starting local playback.')
+        if status.get('error'): raise f.Failure('MPD reports an error: ' + status['error'])
+        self.check_rules(row)
+        actual = (spotify.get('device') or {}).get('id')
+        if actual and actual != self.device: raise f.Failure('Another Spotify device is active; local playback was not started.')
+        self.commit_selection(row['id'])
+        self.local_active = {'id':row['id'], 'uri':row['uri'], 'song_id':None, 'starting':True}
+        self.set_meta('local_active', self.local_active)
+        self.set_meta('local_last_progress', 0)
+        try:
+            if spotify.get('is_playing'):
+                self.api.call('/me/player/pause', 'PUT', params={'device_id':self.device})
+                for _ in range(4):
+                    observed = self.api.call('/me/player')
+                    active_device = (observed.get('device') or {}).get('id')
+                    if active_device and active_device != self.device:
+                        raise f.Failure('Spotify device changed while pausing; local playback was not started.')
+                    if not observed.get('is_playing'): break
+                    time.sleep(.25)
+                else: raise f.Failure('Spotify pause was not confirmed; local playback was not started.')
+            result = self.local.call('play', uri=row['uri'], volume=self.local_config.get('volume',50))
+            if result.get('song_id') is None: raise f.Failure('Local start response did not identify the MPD queue item.')
+            self.local_active.update(song_id=str(result['song_id']), starting=False)
+            self.set_meta('local_active', self.local_active)
+            self.db.execute("UPDATE songs SET state='past',detail='Replaced at local-source transition' WHERE state='playing'")
+            self.db.execute("UPDATE songs SET state='accepted',detail='Local start accepted; awaiting observed playback' WHERE id=?", (row['id'],))
+            self.db.commit()
+            self.idle_ready = False
+        except f.Failure as error:
+            self.db.execute("UPDATE songs SET state='uncertain',detail=? WHERE id=?", (str(error),row['id']))
+            self.db.commit()
+            raise
+
+    def owned_local_status(self):
+        status = self.local.call('status')
+        active = self.local_active
+        if active and (status.get('uri') != active['uri'] or
+                       (active.get('song_id') is not None and str(status.get('song_id')) != active['song_id'])):
+            raise f.Failure('MPD track ownership changed. Check the local player before reconciling.')
+        return status
+
+    def stop_local_owned(self):
+        if not self.local_active: return
+        status = self.local.call('status')
+        if status.get('state') != 'stop':
+            self.owned_local_status()
+            self.local.call('stop')
+        if self.local.call('status').get('state') != 'stop':
+            raise f.Failure('MPD stop could not be confirmed. Spotify was not started.')
+        self.db.execute("UPDATE songs SET state='past',detail='Local playback stopped by host' WHERE id=?", (self.local_active['id'],))
+        self.db.commit()
+        self.local_active = None
+        self.set_meta('local_active', None)
+
+    def poll_local(self):
+        active = self.local_active
+        status = self.owned_local_status()
+        if active.get('starting'):
+            raise f.Failure('Local start is unresolved. Check MPD and reconcile the request before restarting.')
+        row = self.db.execute('SELECT * FROM songs WHERE id=?',(active['id'],)).fetchone()
+        if not row or row['state'] == 'uncertain':
+            raise f.Failure('Local playback requires host reconciliation.')
+        try:
+            spotify = self.api.call('/me/player')
+        except f.Failure:
+            if status.get('state') == 'play': self.local.call('pause')
+            raise
+        actual = (spotify.get('device') or {}).get('id')
+        if spotify.get('is_playing') or (actual and actual != self.device):
+            # Never stop someone else's MPD item; ownership was verified above.
+            self.local.call('pause')
+            raise f.Failure('Spotify playback resumed or moved during a local track. MPD paused; check both players before restarting.')
+        if status.get('error'): raise f.Failure('MPD reports an error: ' + status['error'])
+        song = json.loads(row['metadata'])
+        self.now = dict(song, playing=status['state']=='play', progress_ms=status.get('progress_ms',0))
+        self.updated = time.time()
+        self.error = ''
+        if status['state'] == 'play':
+            self.db.execute("UPDATE songs SET state='playing' WHERE id=?", (row['id'],))
+            self.db.commit()
+            self.set_meta('local_last_progress', status.get('progress_ms',0))
+            self.observe_play({'item':song,'device':{'id':self.device},'is_playing':True,'progress_ms':status.get('progress_ms',0)})
+            return
+        if status['state'] == 'pause': return
+        duration = song.get('duration_ms') or 0
+        previous = self.meta('local_last_progress', 0)
+        # Only an observed near-end can advance automatically. An external stop is held.
+        if row['state'] != 'playing' or not duration or previous < max(0, duration-10000):
+            raise f.Failure('Local playback stopped before an observed end. Check MPD, then restart or reconcile.')
+        self.db.execute("UPDATE songs SET state='past',detail='Local near-end followed by stop; full completion unverified' WHERE id=?", (row['id'],))
+        self.db.execute("UPDATE plays SET outcome='unknown' WHERE outcome='observing'")
+        self.db.commit()
+        self.local_active = None
+        self.set_meta('local_active', None)
+        self.idle_ready = True
+        if self.enabled:
+            next_row = next((r for r in self.queue('') if r['state']=='waiting'),None)
+            if next_row: self.start_idle_request(next_row)
+        # With no requests, remain idle. The next request starts on its own source.
+    def skip_mixed_request(self):
+        pending = self.db.execute("SELECT id FROM songs WHERE state IN ('accepted','queued')").fetchall()
+        if any(not self.local_active or r['id'] != self.local_active['id'] for r in pending):
+            raise f.Failure('A Spotify request is already handed off. Wait for it or reconcile it before switching sources.')
+        if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
+            raise f.Failure('Reconcile the uncertain request before skipping.')
+        row = next((r for r in self.queue('') if r['state']=='waiting'),None)
+        if row: self.check_rules(row)
+        enabled = self.enabled
+        self.enabled = False
+        try:
+            if self.local_active: self.stop_local_owned()
+            state = self.api.call('/me/player')
+            actual = (state.get('device') or {}).get('id')
+            if actual and actual != self.device:
+                raise f.Failure('Another Spotify device is active; restart on the selected player.')
+            if row: self.start_idle_request(row)
+            else:
+                self.idle_ready = True
+                self.now = None
+            self.enabled = enabled
+            self.reason, self.error, self.next_poll = '', '', 0
+        except f.Failure as error:
+            self.reason = self.error = 'Skip needs attention: ' + str(error)
+            raise
