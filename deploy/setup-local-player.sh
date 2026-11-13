@@ -11,7 +11,7 @@ for tool in mpd mpc systemctl; do
     exit 1
   fi
 done
-if ! mpd --version | grep -qw pulse; then
+if ! mpd --version | grep -w pulse >/dev/null; then
   echo 'This MPD build does not advertise the pulse output plugin; stop and inspect before proceeding.' >&2
   exit 1
 fi
