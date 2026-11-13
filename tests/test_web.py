@@ -318,3 +318,67 @@ class SessionStartTests(unittest.TestCase):
             self.app.start_session('speaker',True)
         self.assertFalse(self.app.enabled)
         self.assertEqual(len([c for c in self.api.calls if c[1]!='GET']),1)
+
+class SkipRequestTests(unittest.TestCase):
+    setUp = WebTests.setUp
+    tearDown = WebTests.tearDown
+
+    def prepare(self):
+        self.app.device,self.app.enabled='speaker',True
+        self.app.sessions[self.sessions[0]]['host']=True
+        original=self.api.call
+        def call(path,method='GET',payload=None,params=None):
+            result=original(path,method,payload,params)
+            if path=='/me/player/play':
+                self.api.state['item']={'uri':payload['uris'][0],'duration_ms':100000}
+            elif path=='/me/player/next':
+                self.api.state['item']={'uri':getattr(self,'next_uri',C),'duration_ms':100000}
+            return result
+        return call
+
+    def test_skip_uses_vote_winner_and_keeps_running(self):
+        from unittest.mock import patch
+        for sid,uri in zip(self.sessions,(A,B,C)):self.app.submit(sid,uri)
+        self.app.vote(self.sessions[1],2)
+        with patch.object(self.api,'call',side_effect=self.prepare()):
+            self.app.action(self.sessions[0],'/api/host/skip',{})
+        self.assertTrue(self.app.enabled)
+        self.assertEqual(self.app.now['uri'],B)
+        self.assertEqual(self.app.db.execute('SELECT state FROM songs WHERE id=2').fetchone()[0],'playing')
+        writes=[c for c in self.api.calls if c[1]!='GET']
+        self.assertEqual([c[0] for c in writes],['/me/player/play'])
+
+    def test_already_handed_off_track_is_not_added_or_played_twice(self):
+        from unittest.mock import patch
+        self.app.submit(self.sessions[0],A)
+        self.app.db.execute("UPDATE songs SET state='accepted'");self.app.db.commit()
+        self.next_uri=A
+        with patch.object(self.api,'call',side_effect=self.prepare()):self.app.skip_request()
+        self.assertTrue(self.app.enabled)
+        self.assertEqual([c[0] for c in self.api.calls if c[1]!='GET'],['/me/player/next'])
+
+    def test_empty_queue_uses_normal_skip_and_keeps_running(self):
+        from unittest.mock import patch
+        with patch.object(self.api,'call',side_effect=self.prepare()):self.app.skip_request()
+        self.assertTrue(self.app.enabled)
+        self.assertEqual(self.app.now['uri'],C)
+
+    def test_timeout_marks_request_uncertain_and_does_not_retry(self):
+        from unittest.mock import patch
+        self.app.submit(self.sessions[0],A)
+        call=self.prepare()
+        self.api.error=f.Failure('timeout',uncertain=True)
+        with patch.object(self.api,'call',side_effect=call),self.assertRaises(f.Failure):self.app.skip_request()
+        self.assertFalse(self.app.enabled)
+        self.assertEqual(self.app.queue('')[0]['state'],'uncertain')
+        writes=len([c for c in self.api.calls if c[1]!='GET'])
+        with self.assertRaises(f.Failure):self.app.skip_request()
+        self.assertEqual(len([c for c in self.api.calls if c[1]!='GET']),writes)
+
+    def test_unconfirmed_track_change_stops(self):
+        from unittest.mock import patch
+        self.app.submit(self.sessions[0],A)
+        self.app.device,self.app.enabled='speaker',True
+        with patch.object(w.time,'sleep'),self.assertRaises(f.Failure):self.app.skip_request()
+        self.assertFalse(self.app.enabled)
+        self.assertEqual(self.app.queue('')[0]['state'],'uncertain')

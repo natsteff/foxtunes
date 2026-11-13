@@ -264,6 +264,69 @@ class App:
             self.next_poll = time.monotonic() + 30
             raise f.Failure(self.reason)
 
+    def skip_request(self):
+        if not self.device:
+            raise f.Failure('Start a session on the selected player first.')
+        if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
+            raise f.Failure('Reconcile the uncertain handoff before skipping.')
+        resume = self.enabled
+        chosen = None
+        mutated = False
+        self.enabled = False
+        try:
+            before = self.api.call('/me/player')
+            before_uri = (before.get('item') or {}).get('uri')
+            if (before.get('device') or {}).get('id') != self.device:
+                raise f.Failure('Selected player is no longer active. Start the session again before skipping.')
+            # A handed-off request is locked ahead of still-votable requests.
+            pending = self.db.execute("SELECT * FROM songs WHERE state IN ('accepted','queued') ORDER BY id LIMIT 1").fetchone()
+            if pending:
+                chosen = dict(pending)
+                # Already playing but not yet reconciled: do not replay it.
+                if (before.get('item') or {}).get('uri') == chosen['uri'] and before.get('is_playing'):
+                    self.db.execute("UPDATE songs SET state='playing' WHERE id=?", (chosen['id'],))
+                    self.db.commit()
+                    pending = chosen = None
+            if not pending:
+                chosen = next((r for r in self.queue('') if r['state'] == 'waiting'), None)
+            if chosen and not pending:
+                self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (chosen['id'],))
+                self.db.commit()
+                mutated = True
+                self.api.call('/me/player/play', 'PUT', {'uris': [chosen['uri']]}, {'device_id': self.device})
+            else:
+                # Do not queue or directly play an already-handed-off URI twice.
+                mutated = True
+                self.api.call('/me/player/next', 'POST', params={'device_id': self.device})
+            for attempt in range(4):
+                observed = self.api.call('/me/player')
+                item = observed.get('item') or {}
+                target = chosen['uri'] if chosen else None
+                changed = item.get('uri') == target if target else bool(item.get('uri') and item.get('uri') != before_uri)
+                if (observed.get('device') or {}).get('id') == self.device and observed.get('is_playing') and changed:
+                    break
+                time.sleep(0.5)
+            else:
+                raise f.Failure('Next track could not be confirmed. Handoff stopped; reconcile before trying again.')
+            self.db.execute("UPDATE songs SET state='past',detail='Host skipped; full playback not claimed' WHERE state='playing'")
+            if chosen:
+                self.db.execute("UPDATE songs SET state='playing',detail='Host skip observed selected request playing' WHERE id=?", (chosen['id'],))
+            self.db.commit()
+            self.now = dict(track(observed.get('item') or {}), playing=True, progress_ms=observed.get('progress_ms', 0))
+            self.updated = time.time()
+            self.enabled = resume
+            self.reason = '' if resume else 'Handoff stopped by host.'
+            self.error = ''
+            self.next_poll = time.monotonic() + 5
+        except f.Failure as error:
+            if chosen and mutated:
+                self.db.execute("UPDATE songs SET state='uncertain',detail=? WHERE id=?", (str(error), chosen['id']))
+                self.db.commit()
+            self.reason = 'Skip needs attention: ' + str(error)
+            self.error = self.reason
+            self.next_poll = time.monotonic() + 30
+            raise f.Failure(self.reason)
+
     def action(self, sid, route, body):
         session = self.sessions[sid]
         if route == '/api/host/login':
@@ -323,7 +386,9 @@ class App:
             self.db.execute("UPDATE songs SET state='past', detail=? WHERE id=?",
                             ('Host reconciled; no completion claim: ' + note[:300], int(body['id'])))
             self.db.commit()
-        elif route in ('/api/host/pause', '/api/host/skip'):
+        elif route == '/api/host/skip':
+            self.skip_request()
+        elif route == '/api/host/pause':
             if not self.device:
                 raise f.Failure('Select the playback device first.')
             self.enabled = False

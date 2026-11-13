@@ -108,3 +108,7 @@ The web prototype uses its own `web.sqlite3` so earlier CLI experiments remain i
 ## Starting a dedicated player (v0.1.2+)
 
 On the host desk, select the paired, online Soloist/Connect device and click **Start session**. FoxTunes transfers playback and verifies the target is playing before enabling request handoff. If the player has no playback context, add a request first; FoxTunes uses the highest-voted request as its first track. Start also disables shuffle/repeat. **Stop session** stops new handoffs without stopping the audio. **Move / restart session here** starts the selected destination. These controls replace the earlier handoff checkbox and Apply settings workflow described above. No Spotify desktop app is required for normal startup. Live behavior depends on the account's device-control permissions and the player being available; local control is not implemented as a fallback.
+
+## Queue-aware host skip and mobile feedback (v0.1.3+)
+
+**Skip to next request** immediately starts the next FoxTunes request in vote order. Already-handed-off requests are locked ahead of waiting requests and are advanced to without re-queueing them. With no pending requests, Spotify advances normally. Successful skip preserves a running session; failed or uncertain playback confirmation stops handoff for reconciliation. Guests cannot invoke this action. Mobile shows now playing and coming up before search. Request buttons show Adding… while saving and ✓ Requested after success, with a visible confirmation and an updated queue.

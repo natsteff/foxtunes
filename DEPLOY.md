@@ -17,7 +17,7 @@ Download `compose.yml` and `.env.example` from the private repository into a ser
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.2
+FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.3
 FOXTUNES_PUBLIC_URL=http://foxtunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -111,7 +111,7 @@ The callback listener binds all container interfaces only while this CLI login i
 2. Request a song in FoxTunes if the player has no existing playback context.
 3. In the host desk, refresh devices, select the player and click **Start session**. This transfers playback, resumes the existing context or starts the top request if there is no context, and turns shuffle/repeat off.
 4. FoxTunes enables automatic handoff only after it observes the selected device playing. Confirm **Running**. No handoff checkbox or manual Spotify app activation is needed.
-5. **Move / restart session here** applies the same flow to the selected target. **Stop session** stops dispatch while current music continues. Host Pause/Skip also stop dispatch; use Start to resume coordinated playback.
+5. **Move / restart session here** applies the same flow to the selected target. **Stop session** stops dispatch while current music continues. Host Pause stops dispatch. Skip to next request immediately starts the next FoxTunes request and preserves a running session; when no requests are pending, it advances Spotify normally. A handed-off request is advanced to without adding its URI again. An unconfirmed skip stops dispatch for reconciliation.
 
 If Spotify refuses transfer/control or does not report playing state, the session stays stopped with an actionable error. Refresh discovery if a device disappears or its ID changes. An accepted command is not playback proof. No local Soloist WebSocket or PINE service configuration is changed by this release.
 
@@ -134,4 +134,4 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.2` tag publishes `ghcr.io/natsteff/foxtunes:0.1.2` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.3` tag publishes `ghcr.io/natsteff/foxtunes:0.1.3` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.

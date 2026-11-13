@@ -3,3 +3,6 @@
 .now h2 a{text-decoration:none}
 
 #handoffstatus{padding:12px;border:1px solid #566247;border-radius:6px;font-size:13px}#controls a{color:#e4edcc}
+
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);max-width:min(90vw,600px);z-index:10;background:#e4edcc;color:#26301e;padding:16px 22px;border-radius:9px;box-shadow:0 8px 32px #0008;font-size:14px;font-weight:600}
+@media(max-width:760px){.layout>aside{order:-1}.layout>.discover{order:1}.intro h1{font-size:42px;margin:12px 0}.intro{padding-bottom:16px}.intro p{font-size:13px}.now{margin-bottom:20px}.upnext{margin-bottom:8px}}
