@@ -30,3 +30,6 @@ refresh();setInterval(refresh,5000);
 
 $('show-qr').onclick=async()=>{try{const share=await api('/api/share');const url=new URL(share.url);if(!['http:','https:'].includes(url.protocol))throw Error('Invalid server URL.');$('share-url').textContent=url.href;$('share-url').href=url.href;$('qrcode').replaceChildren();new QRCode($('qrcode'),{text:url.href,width:240,height:240,correctLevel:QRCode.CorrectLevel.M});$('share-dialog').showModal();}catch(e){message(e.message);}};
 $('close-share').onclick=()=>$('share-dialog').close();
+
+// Search filters are transient. Do not restore positional form values from the host configuration.
+window.addEventListener('pageshow',()=>{$('search').reset();});
