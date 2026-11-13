@@ -98,6 +98,7 @@ class App(RoomFeatures):
             f.private_write(hostfile, {'password': secrets.token_urlsafe(24)})
         self.password = f.load(hostfile)['password']
         self.room_init()
+        self.idle_ready = False
 
     def session(self, sid):
         now = time.time()
@@ -120,12 +121,54 @@ class App(RoomFeatures):
             raise f.Failure('Please wait before trying again.')
         q.append(now)
 
+    def update_idle_state(self, state):
+        """Recognize a fresh observed end, not an arbitrary pause or inactive player."""
+        item = state.get('item') or {}
+        actual = (state.get('device') or {}).get('id')
+        previous = self.now or {}
+        if state.get('is_playing') or (actual and actual != self.device):
+            self.idle_ready = False
+            return
+        if self.idle_ready:
+            if item.get('uri') and item.get('uri') != previous.get('uri'):
+                self.idle_ready = False
+            return
+        duration = previous.get('duration_ms') or 0
+        remaining = max(0, duration - (previous.get('progress_ms') or 0))
+        elapsed = time.time() - self.updated if self.updated else float('inf')
+        progress = state.get('progress_ms') or 0
+        ended_position = not item or progress == 0 or (duration and progress >= duration - 1000)
+        same_track = not item or item.get('uri') == previous.get('uri')
+        if (self.enabled and previous.get('playing') and duration and 0 <= remaining <= 15000
+                and getattr(self, 'observed_device', None) == self.device and self.device
+                and 0 <= elapsed <= 30 and elapsed + 1 >= remaining / 1000
+                and ended_position and same_track):
+            self.idle_ready = True
+            self.db.execute("UPDATE songs SET state='past',detail='Observed end; ready for next request' WHERE state='playing'")
+            self.db.execute("UPDATE plays SET outcome='unknown' WHERE outcome='observing'")
+            self.db.commit()
+
+    def start_idle_request(self, row):
+        self.check_rules(row)
+        self.commit_selection(row['id'])
+        self.idle_ready = False
+        try:
+            # Queue insertion alone cannot start an exhausted Spotify player.
+            self.api.call('/me/player/play', 'PUT', {'uris': [row['uri']]}, {'device_id': self.device})
+        except f.Failure as error:
+            self.db.execute("UPDATE songs SET state='uncertain',detail=? WHERE id=?", (str(error), row['id']))
+            self.db.commit()
+            raise
+        self.db.execute("UPDATE songs SET state='accepted',detail='Idle-player start accepted; awaiting observed playback' WHERE id=?", (row['id'],))
+        self.db.commit()
+
     def poll(self, force=False):
         if not force and time.monotonic() < self.next_poll:
             return
         self.next_poll = time.monotonic() + (5 if self.enabled else 20)
         try:
             state = self.api.call('/me/player')
+            self.update_idle_state(state)
             self.updated = time.time()
             self.error = ''
             item = state.get('item') or {}
@@ -141,9 +184,14 @@ class App(RoomFeatures):
             self.refresh_upcoming()
             if not self.enabled:
                 return
-            if actual != self.device:
+            if actual != self.device and not (self.idle_ready and not actual):
                 raise f.Failure('Playback device changed. Handoff stopped; host must re-enable it.')
             if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','accepted','queued','uncertain')").fetchone():
+                return
+            if self.idle_ready:
+                row = next((r for r in self.queue('') if r['state'] == 'waiting'), None)
+                if row:
+                    self.start_idle_request(row)
                 return
             if not state.get('is_playing') or not item.get('duration_ms') or item['duration_ms'] - (state.get('progress_ms') or 0) > 15000:
                 return
@@ -173,11 +221,11 @@ class App(RoomFeatures):
         status = 'Running' if self.enabled else ('Needs attention' if self.reason and self.reason not in (
             'Session stopped after startup. Verify device and enable handoff.', 'Handoff stopped by host.',
             'Handoff stopped after host reconciliation.', 'Handoff stopped after host playback control.') else 'Stopped')
-        return {'status': status, 'reason': self.reason, 'stale': not self.updated or time.time()-self.updated>45,
+        return {'status': status, 'reason': self.reason, 'idle': self.enabled and self.idle_ready, 'stale': not self.updated or time.time()-self.updated>45,
                 'accepting': self.accepting, 'error': self.error,
                 'player_active': bool(self.now),
                 'recovery': ('Reconnect Spotify from the host desk.' if any(x in self.error.lower() for x in ('token','authoriz','401','login')) else
-                             'Refresh devices and start the session on an available player.') if self.error or not self.now else ''}
+                             'Refresh devices and start the session on an available player.') if self.error or (not self.now and not (self.enabled and self.idle_ready)) else ''}
 
     def oauth_start(self, session):
         if not session['host']:
@@ -266,6 +314,7 @@ class App(RoomFeatures):
             f.private_write(self.data / 'settings.json', {'device': device, 'accepting': accepting})
             self.device, self.accepting = device, accepting
             self.enabled, self.reason, self.error = True, '', ''
+            self.idle_ready = False
             self.next_poll = 0
             self.now = dict(track(observed.get('item') or {}), playing=True, progress_ms=observed.get('progress_ms', 0))
             self.updated = time.time()
@@ -369,6 +418,7 @@ class App(RoomFeatures):
             self.start_session(str(body.get('device', '')), bool(body.get('accepting', True)))
         elif route == '/api/host/stop':
             self.enabled = False
+            self.idle_ready = False
             self.reason = 'Handoff stopped by host.'
             self.error = ''
         elif route == '/api/host/settings':
@@ -412,6 +462,7 @@ class App(RoomFeatures):
         elif route == '/api/host/skip':
             self.skip_request()
         elif route == '/api/host/pause':
+            self.idle_ready = False
             if not self.device:
                 raise f.Failure('Select the playback device first.')
             self.enabled = False

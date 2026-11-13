@@ -55,3 +55,10 @@ Automated tests cover identity persistence, authorization, vote attribution, gua
 Hosts can browse their Spotify library, filter loaded pages, search Spotify playlists or open a playlist link/ID. Enabling a playlist verifies contents access and shares its metadata/tracks with guests; disabling it blocks further guest reads even while a cached page exists. Guests browse enabled playlists and request individual supported tracks through the existing queue. Local-file entries remain visible but cannot be requested until playback support is established.
 
 Existing Spotify authorization must be renewed for playlist-read-private and playlist-read-collaborative. Spotify may limit track access to owned/collaborative playlists. Playlist discovery does not override that restriction. This feature provides no playlist downloads or MP3 transfer.
+
+
+## Empty-queue recovery (0.3.1)
+
+An enabled session remains ready after an observed track end. A fresh selected-device observation near the end followed by an elapsed, exhausted/empty playback state arms idle recovery. When a waiting request arrives, the worker starts the protected next request directly on the selected device; inserting it into Spotify's queue alone cannot restart an exhausted player. Acceptance still waits for observed playback, and uncertain starts are held without automatic retries.
+
+Host Pause/Stop and mid-track pauses do not trigger recovery. Other active devices are not taken over; server restarts still require host Start. A stale observation is not treated as proof of exhaustion. Spotify polling cannot perfectly distinguish a manual stop exactly at the end from a natural ending. No automatic background playlist is selected when there are no requests.
