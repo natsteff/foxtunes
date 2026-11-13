@@ -124,3 +124,10 @@ The header's **Show QR code** button opens a scannable link to the installation'
 ## Repository name
 
 Source: [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes). Deployments may use `/opt/unicorntunes`; the Compose project remains explicitly `foxtunes` to preserve existing containers and data. Application settings retain the FOXTUNES_* namespace and the guest URL remains configurable (including unicorntunes.nate). See the directory-rename instructions in [DEPLOY.md](DEPLOY.md).
+
+
+## Room features (v0.2.0)
+
+UnicornTunes now includes returning guest names, request/vote attribution, highlighted personal requests, protected first turns with every-third-oldest scheduling, House Favorites, Room stats/history, host music rules, theme nights, saved playback locations, customizable site copy, playback health and a tablet view at `/display`. The original five text defaults remain unchanged.
+
+See [Room features](ROOM_FEATURES.md) for exact queue rules, play-count definitions, upgrade behavior and limitations. Releases publish both their numbered Docker tag and `latest`.

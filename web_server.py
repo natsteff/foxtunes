@@ -16,6 +16,7 @@ import time
 from urllib.parse import parse_qs, urlsplit, urlencode
 
 import foxtunes as f
+from room import RoomFeatures
 
 
 def track(item):
@@ -25,7 +26,9 @@ def track(item):
             'url': (item.get('external_urls') or {}).get('spotify', ''),
             'duration_ms': item.get('duration_ms', 0),
             'album': (item.get('album') or {}).get('name', ''),
-            'year': (item.get('album') or {}).get('release_date', '')[:4]}
+            'year': (item.get('album') or {}).get('release_date', '')[:4],
+            'explicit': item.get('explicit'),
+            'artist_names': [a['name'] for a in item.get('artists', [])]}
 
 
 def search_options(query):
@@ -54,7 +57,7 @@ def search_options(query):
     return ' '.join(parts), title.casefold() if exact else None
 
 
-class App:
+class App(RoomFeatures):
     def __init__(self, data=f.DATA, api=None):
         self.data, self.api = data, api or f.Spotify(data)
         data.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -94,6 +97,7 @@ class App:
         if not hostfile.exists():
             f.private_write(hostfile, {'password': secrets.token_urlsafe(24)})
         self.password = f.load(hostfile)['password']
+        self.room_init()
 
     def session(self, sid):
         now = time.time()
@@ -116,34 +120,6 @@ class App:
             raise f.Failure('Please wait before trying again.')
         q.append(now)
 
-    def queue(self, sid):
-        rows = self.db.execute('''SELECT s.*,count(v.guest) AS votes,
-          max(CASE WHEN v.guest=? THEN 1 ELSE 0 END) AS voted FROM songs s
-          LEFT JOIN votes v ON v.song=s.id WHERE s.state NOT IN ('removed','past','playing')
-          GROUP BY s.id ORDER BY CASE WHEN s.state='waiting' THEN 1 ELSE 0 END,
-          votes DESC,s.created,s.id''', (sid,)).fetchall()
-        return [dict(json.loads(r['metadata']), id=r['id'], state=r['state'], votes=r['votes'], voted=bool(r['voted'])) for r in rows]
-
-    def submit(self, sid, uri):
-        if not self.accepting:
-            raise f.Failure('The host has paused new requests.')
-        if uri not in self.catalog:
-            raise f.Failure('Search for this track first.')
-        if self.db.execute("SELECT id FROM songs WHERE uri=? AND state NOT IN ('past','removed')", (uri,)).fetchone():
-            raise f.Failure('Already requested. Give it a vote instead.')
-        if self.db.execute("SELECT count(*) FROM songs WHERE guest=? AND state='waiting'", (sid,)).fetchone()[0] >= 3:
-            raise f.Failure('You can have up to three waiting requests.')
-        self.db.execute('INSERT INTO songs(guest,uri,metadata,created) VALUES(?,?,?,?)',
-                        (sid, uri, json.dumps(self.catalog[uri]), time.time()))
-        self.db.commit()
-
-    def vote(self, sid, song):
-        row = self.db.execute('SELECT state FROM songs WHERE id=?', (song,)).fetchone()
-        if not row or row['state'] != 'waiting':
-            raise f.Failure('This track is locked for playback.')
-        self.db.execute('INSERT OR IGNORE INTO votes(song,guest) VALUES(?,?)', (song, sid))
-        self.db.commit()
-
     def poll(self, force=False):
         if not force and time.monotonic() < self.next_poll:
             return
@@ -154,12 +130,15 @@ class App:
             self.error = ''
             item = state.get('item') or {}
             actual = (state.get('device') or {}).get('id')
+            self.observed_device = actual
             self.now = dict(track(item), playing=bool(state.get('is_playing')), progress_ms=state.get('progress_ms', 0)) if item else None
             pending = self.db.execute("SELECT * FROM songs WHERE state IN ('sending','accepted','queued','uncertain') ORDER BY id LIMIT 1").fetchone()
             if pending and item.get('uri') == pending['uri'] and actual == self.device and state.get('is_playing') and pending['state'] != 'uncertain':
                 self.db.execute("UPDATE songs SET state='playing' WHERE id=?", (pending['id'],))
             self.db.execute("UPDATE songs SET state='past', detail='No longer current; completion unverified' WHERE state='playing' AND uri!=?", (item.get('uri', ''),))
             self.db.commit()
+            self.observe_play(state)
+            self.refresh_upcoming()
             if not self.enabled:
                 return
             if actual != self.device:
@@ -172,6 +151,8 @@ class App:
             row = next((r for r in rows if r['state'] == 'waiting'), None)
             if not row:
                 return
+            self.check_rules(row)
+            self.commit_selection(row['id'])
             self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (row['id'],))
             self.db.commit()
             try:
@@ -192,7 +173,11 @@ class App:
         status = 'Running' if self.enabled else ('Needs attention' if self.reason and self.reason not in (
             'Session stopped after startup. Verify device and enable handoff.', 'Handoff stopped by host.',
             'Handoff stopped after host reconciliation.', 'Handoff stopped after host playback control.') else 'Stopped')
-        return {'status': status, 'reason': self.reason}
+        return {'status': status, 'reason': self.reason, 'stale': not self.updated or time.time()-self.updated>45,
+                'accepting': self.accepting, 'error': self.error,
+                'player_active': bool(self.now),
+                'recovery': ('Reconnect Spotify from the host desk.' if any(x in self.error.lower() for x in ('token','authoriz','401','login')) else
+                             'Refresh devices and start the session on an available player.') if self.error or not self.now else ''}
 
     def oauth_start(self, session):
         if not session['host']:
@@ -255,6 +240,8 @@ class App:
                         raise f.Failure('Player activated. Request a song in UnicornTunes, then press Start session to begin playback.')
                     if self.db.execute("SELECT id FROM songs WHERE state IN ('accepted','queued')").fetchone():
                         raise f.Failure('An earlier handoff remains unresolved. Reconcile it before starting a new track.')
+                    self.check_rules(seed)
+                    self.commit_selection(seed['id'])
                     self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (seed['id'],))
                     self.db.commit()
                     try:
@@ -285,6 +272,7 @@ class App:
             if seed and (observed.get('item') or {}).get('uri') == seed['uri']:
                 self.db.execute("UPDATE songs SET state='playing' WHERE id=?", (seed['id'],))
                 self.db.commit()
+            self.observe_play(observed)
         except (f.Failure, OSError) as error:
             self.reason = 'Session start needs attention: ' + (str(error) if isinstance(error, f.Failure) else 'Could not save configuration.')
             self.error = self.reason
@@ -318,6 +306,8 @@ class App:
             if not pending:
                 chosen = next((r for r in self.queue('') if r['state'] == 'waiting'), None)
             if chosen and not pending:
+                self.check_rules(chosen)
+                self.commit_selection(chosen['id'])
                 self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (chosen['id'],))
                 self.db.commit()
                 mutated = True
@@ -342,6 +332,7 @@ class App:
             self.db.commit()
             self.now = dict(track(observed.get('item') or {}), playing=True, progress_ms=observed.get('progress_ms', 0))
             self.updated = time.time()
+            self.observe_play(observed, skipped=True)
             self.enabled = resume
             self.reason = '' if resume else 'Handoff stopped by host.'
             self.error = ''
@@ -365,6 +356,9 @@ class App:
             return {'ok': True}
         if route.startswith('/api/host/') and not session['host']:
             raise PermissionError('Host access required.')
+        handled = self.room_action(sid, route, body)
+        if handled is not None:
+            return handled
         if route == '/api/request':
             self.limit(('submit', sid), 6)
             self.submit(sid, body.get('uri'))
@@ -402,6 +396,7 @@ class App:
                 raise f.Failure('Only waiting requests can be removed. Reconcile handed-off tracks in Spotify.')
             self.db.execute("UPDATE songs SET state='removed' WHERE id=?", (int(body['id']),))
             self.db.commit()
+            self.reserve_next()
         elif route == '/api/host/reconcile':
             note = str(body.get('note', '')).strip()
             if len(note) < 10:
@@ -448,6 +443,8 @@ def handler(app):
             self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
             if cookie:
                 self.send_header('Set-Cookie', 'ft_session=' + cookie + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800' + ('; Secure' if app.public_url.startswith('https://') else ''))
+            if getattr(self, 'guest_token', None):
+                self.send_header('Set-Cookie', 'ft_guest=' + self.guest_token + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=31536000' + ('; Secure' if app.public_url.startswith('https://') else ''))
             self.end_headers()
             self.wfile.write(raw)
 
@@ -461,17 +458,23 @@ def handler(app):
                     cookies = SimpleCookie(self.headers.get('Cookie', ''))
                     old = cookies.get('ft_session')
                     sid, session = app.session(old.value if old else '')
+                    guest_cookie = cookies.get('ft_guest')
+                    self.guest_token = app.attach_guest(sid, guest_cookie.value if guest_cookie else '')
                     if post:
                         if self.headers.get('Origin') != (app.public_url or 'http://' + host) or self.headers.get('X-FoxTunes-CSRF') != session['csrf']:
                             raise PermissionError('Invalid request origin or session.')
                         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
                             raise ValueError('JSON required.')
                         length = int(self.headers.get('Content-Length', 0))
-                        if not 0 < length <= 4096:
+                        if not 0 < length <= 32768:
                             raise ValueError('Invalid request size.')
                         app.limit(('ip', self.client_address[0]), 100)
                         body = json.loads(self.rfile.read(length))
+                        if not isinstance(body, dict):
+                            raise ValueError('JSON object required.')
                         payload = app.action(sid, urlsplit(self.path).path, body)
+                        if '_guest_token' in payload:
+                            self.guest_token = payload.pop('_guest_token')
                     else:
                         parsed = urlsplit(self.path)
                         query = parse_qs(parsed.query)
@@ -490,17 +493,21 @@ def handler(app):
                             app.oauth_finish(session, query)
                             self.respond(200, b'<!doctype html><title>UnicornTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
                             return
-                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js'):
-                            name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
-                            content = {'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png', 'vendor/qrcode.min.js': 'text/javascript'}[name]
+                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js', '/room.js', '/room.css', '/display'):
+                            name = {'/room.js': 'room.js', '/room.css': 'room.css', '/display': 'index.html', '/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
+                            content = {'room.js': 'text/javascript', 'room.css': 'text/css', 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png', 'vendor/qrcode.min.js': 'text/javascript'}[name]
                             self.respond(200, (Path(__file__).parent / 'web' / name).read_bytes(), content, sid)
                             return
-                        if parsed.path == '/api/share':
+                        if parsed.path == '/api/favorites':
+                            payload = {'items': app.favorites()}
+                        elif parsed.path == '/api/stats':
+                            payload = app.stats(query.get('period', ['tonight'])[0], sid)
+                        elif parsed.path == '/api/share':
                             payload = {'url': (app.public_url or 'http://' + host) + '/'}
                         elif parsed.path == '/api/state':
                             payload = {'csrf': session['csrf'], 'host': session['host'], 'now': app.now,
                                        'queue': app.queue(sid), 'accepting': app.accepting, 'enabled': app.enabled,
-                                       'error': app.error, 'updated': app.updated, 'handoff': app.health()}
+                                       'error': app.error, 'updated': app.updated, 'handoff': app.health(), **app.room_state(sid)}
                             if session['host']:
                                 payload['device'] = app.device
                                 payload['spotify_connected'] = (app.data / 'tokens.json').exists()

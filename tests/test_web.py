@@ -54,10 +54,11 @@ class WebTests(unittest.TestCase):
         self.assertEqual([r['uri'] for r in self.app.queue('')], [A, B, C])
         self.app.vote(self.sessions[0], 3)
         self.app.vote(self.sessions[0], 3)
-        self.assertEqual(self.app.queue('')[0]['uri'], C)
+        self.assertEqual(self.app.queue('')[0]['uri'], A)
+        self.assertEqual(next(r for r in self.app.queue('') if r['uri']==C)['votes'], 2)
         self.assertEqual(self.app.queue('')[0]['votes'], 1)
         self.app.vote(self.sessions[1], 2)
-        self.assertEqual([r['uri'] for r in self.app.queue('')], [B, C, A])
+        self.assertEqual([r['uri'] for r in self.app.queue('')], [A, B, C])
         self.app.db.execute("UPDATE songs SET state='accepted' WHERE id=2")
         with self.assertRaises(f.Failure):
             self.app.vote(self.sessions[2], 2)
@@ -78,7 +79,7 @@ class WebTests(unittest.TestCase):
                 self.app.action(self.sessions[0], '/api/host/'+route, {})
         self.assertFalse(self.api.calls)
 
-    def test_scheduler_off_then_vote_winner_only_and_no_retry(self):
+    def test_scheduler_off_then_protected_next_only_and_no_retry(self):
         for sid, uri in zip(self.sessions, (A, B, C)):
             self.app.submit(sid, uri)
         self.app.vote(self.sessions[1], 3)
@@ -88,7 +89,7 @@ class WebTests(unittest.TestCase):
         self.app.poll(True)
         writes = [c for c in self.api.calls if c[1] != 'GET']
         self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0][2]['uri'], C)
+        self.assertEqual(writes[0][2]['uri'], A)
         self.app.poll(True)
         self.assertEqual(len([c for c in self.api.calls if c[1] != 'GET']), 1)
         self.assertEqual(self.app.queue('')[0]['state'], 'accepted')
@@ -152,7 +153,7 @@ class WebTests(unittest.TestCase):
             self.assertTrue(no_match['more'])
             visible = request(clients[1], '/api/state')
             self.assertEqual(len(visible['queue']), 3)
-            self.assertEqual(visible['queue'][0]['votes'], 1)
+            self.assertEqual(visible['queue'][0]['votes'], 2)
             encoded = json.dumps(visible)
             self.assertNotIn(self.app.password, encoded)
             self.assertNotIn('access_token', encoded)
@@ -344,15 +345,15 @@ class SkipRequestTests(unittest.TestCase):
             return result
         return call
 
-    def test_skip_uses_vote_winner_and_keeps_running(self):
+    def test_skip_respects_protected_next_and_keeps_running(self):
         from unittest.mock import patch
         for sid,uri in zip(self.sessions,(A,B,C)):self.app.submit(sid,uri)
         self.app.vote(self.sessions[1],2)
         with patch.object(self.api,'call',side_effect=self.prepare()):
             self.app.action(self.sessions[0],'/api/host/skip',{})
         self.assertTrue(self.app.enabled)
-        self.assertEqual(self.app.now['uri'],B)
-        self.assertEqual(self.app.db.execute('SELECT state FROM songs WHERE id=2').fetchone()[0],'playing')
+        self.assertEqual(self.app.now['uri'],A)
+        self.assertEqual(self.app.db.execute('SELECT state FROM songs WHERE id=1').fetchone()[0],'playing')
         writes=[c for c in self.api.calls if c[1]!='GET']
         self.assertEqual([c[0] for c in writes],['/me/player/play'])
 
