@@ -197,6 +197,73 @@ class App:
         f.private_write(self.data / 'tokens.json', tokens)
         self.next_poll = 0
 
+    def start_session(self, device, accepting):
+        devices = self.api.call('/me/player/devices').get('devices', [])
+        if not any(d.get('id') == device and not d.get('is_restricted') for d in devices):
+            raise f.Failure('Player unavailable. Refresh devices and check that Soloist is running.')
+        if self.db.execute("SELECT id FROM songs WHERE state IN ('sending','uncertain')").fetchone():
+            raise f.Failure('Reconcile the uncertain handoff before starting a session.')
+        # A remote mutation may change playback even if its response is lost.
+        # Stop dispatch until the selected target and playing state are observed.
+        self.enabled = False
+        self.reason = 'Starting selected player.'
+        try:
+            self.api.call('/me/player', 'PUT', {'device_ids': [device], 'play': True})
+            observed = {}
+            for attempt in range(4):
+                observed = self.api.call('/me/player')
+                if (observed.get('device') or {}).get('id') == device:
+                    break
+                time.sleep(0.5)
+            if (observed.get('device') or {}).get('id') != device:
+                raise f.Failure('Spotify accepted the transfer but the player has not become active. Handoff remains stopped; try Start again after checking player status.')
+            seed = None
+            if not observed.get('is_playing'):
+                if observed.get('item'):
+                    self.api.call('/me/player/play', 'PUT', {}, {'device_id': device})
+                else:
+                    seed = next((r for r in self.queue('') if r['state'] == 'waiting'), None)
+                    if not seed:
+                        raise f.Failure('Player activated. Request a song in FoxTunes, then press Start session to begin playback.')
+                    if self.db.execute("SELECT id FROM songs WHERE state IN ('accepted','queued')").fetchone():
+                        raise f.Failure('An earlier handoff remains unresolved. Reconcile it before starting a new track.')
+                    self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (seed['id'],))
+                    self.db.commit()
+                    try:
+                        self.api.call('/me/player/play', 'PUT', {'uris': [seed['uri']]}, {'device_id': device})
+                    except f.Failure:
+                        self.db.execute("UPDATE songs SET state='uncertain',detail='Start-track result uncertain; reconcile before retry' WHERE id=?", (seed['id'],))
+                        self.db.commit()
+                        raise
+                    self.db.execute("UPDATE songs SET state='accepted' WHERE id=?", (seed['id'],))
+                    self.db.commit()
+            self.api.call('/me/player/shuffle', 'PUT', params={'state': 'false', 'device_id': device})
+            self.api.call('/me/player/repeat', 'PUT', params={'state': 'off', 'device_id': device})
+            for attempt in range(4):
+                observed = self.api.call('/me/player')
+                valid = ((observed.get('device') or {}).get('id') == device and observed.get('is_playing')
+                         and not observed.get('shuffle_state') and observed.get('repeat_state') in (None, 'off'))
+                if valid:
+                    break
+                time.sleep(0.5)
+            if not valid:
+                raise f.Failure('Player playback/settings could not be confirmed. Handoff remains stopped; check Soloist connectivity and Spotify permissions.')
+            f.private_write(self.data / 'settings.json', {'device': device, 'accepting': accepting})
+            self.device, self.accepting = device, accepting
+            self.enabled, self.reason, self.error = True, '', ''
+            self.next_poll = 0
+            self.now = dict(track(observed.get('item') or {}), playing=True, progress_ms=observed.get('progress_ms', 0))
+            self.updated = time.time()
+            if seed and (observed.get('item') or {}).get('uri') == seed['uri']:
+                self.db.execute("UPDATE songs SET state='playing' WHERE id=?", (seed['id'],))
+                self.db.commit()
+        except (f.Failure, OSError) as error:
+            self.reason = 'Session start needs attention: ' + (str(error) if isinstance(error, f.Failure) else 'Could not save configuration.')
+            self.error = self.reason
+            self.enabled = False
+            self.next_poll = time.monotonic() + 30
+            raise f.Failure(self.reason)
+
     def action(self, sid, route, body):
         session = self.sessions[sid]
         if route == '/api/host/login':
@@ -213,6 +280,12 @@ class App:
         elif route == '/api/vote':
             self.limit(('vote', sid), 30)
             self.vote(sid, int(body['id']))
+        elif route == '/api/host/start':
+            self.start_session(str(body.get('device', '')), bool(body.get('accepting', True)))
+        elif route == '/api/host/stop':
+            self.enabled = False
+            self.reason = 'Handoff stopped by host.'
+            self.error = ''
         elif route == '/api/host/settings':
             accepting = bool(body.get('accepting', True))
             enabled = bool(body.get('enabled'))

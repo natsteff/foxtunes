@@ -1,6 +1,6 @@
 services:
   foxtunes:
-    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.1}
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.2}
     restart: unless-stopped
     init: true
     ports:

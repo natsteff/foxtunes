@@ -9,7 +9,7 @@ FoxTunes runs on the Docker host. Spotify audio plays on a separate Connect devi
 - Nginx Proxy Manager or another reverse proxy, plus local DNS for `foxtunes.nate`.
 - A Connect player associated with the same Spotify account.
 
-Use one FoxTunes container per data volume. Separate installations need separate data and configuration. This release retains the prototype's manual device activation; saved locations and Start/Move session controls are not included yet.
+Use one FoxTunes container per data volume. Separate installations need separate data and configuration. The host's Start session activates the selected Connect player through Spotify's Web API. No other Spotify client needs to be running for this control flow; the player itself must be paired, online and discoverable. Saved named locations are not included yet.
 
 ## Install
 
@@ -17,7 +17,7 @@ Download `compose.yml` and `.env.example` from the private repository into a ser
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.1
+FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.2
 FOXTUNES_PUBLIC_URL=http://foxtunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -107,11 +107,13 @@ The callback listener binds all container interfaces only while this CLI login i
 
 ## Start a listening test
 
-1. Start Spotify playback on the intended speaker/player using Spotify Connect.
-2. In the FoxTunes host desk, select that active device. Turn Spotify shuffle/repeat off.
-3. Enable handoff and apply. Confirm **Running**.
-4. Open the guest page on phones/tablet. Search, request and vote.
-5. FoxTunes sends one request near the current song's end and waits to observe it playing. Remaining requests stay local so votes can reorder them.
+1. Ensure the dedicated player is running and paired with the same Spotify account as FoxTunes.
+2. Request a song in FoxTunes if the player has no existing playback context.
+3. In the host desk, refresh devices, select the player and click **Start session**. This transfers playback, resumes the existing context or starts the top request if there is no context, and turns shuffle/repeat off.
+4. FoxTunes enables automatic handoff only after it observes the selected device playing. Confirm **Running**. No handoff checkbox or manual Spotify app activation is needed.
+5. **Move / restart session here** applies the same flow to the selected target. **Stop session** stops dispatch while current music continues. Host Pause/Skip also stop dispatch; use Start to resume coordinated playback.
+
+If Spotify refuses transfer/control or does not report playing state, the session stays stopped with an actionable error. Refresh discovery if a device disappears or its ID changes. An accepted command is not playback proof. No local Soloist WebSocket or PINE service configuration is changed by this release.
 
 Failed settings validation preserves the last valid configuration. Device takeover/API failures stop handoff with a persistent **Needs attention** reason; a later successful status read does not hide that stop. Settings controls reflect server state after a failed save. Existing Spotify queued items can still precede a new request. A request disappearing from current playback is not proof of full playback or audible sound.
 
@@ -132,4 +134,4 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.1` tag publishes `ghcr.io/natsteff/foxtunes:0.1.1` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.2` tag publishes `ghcr.io/natsteff/foxtunes:0.1.2` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.

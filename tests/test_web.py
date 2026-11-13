@@ -254,3 +254,67 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(json.load(response),{'ok':True})
         finally:
             server.shutdown(); server.server_close(); thread.join()
+
+class SessionStartTests(unittest.TestCase):
+    setUp = WebTests.setUp
+    tearDown = WebTests.tearDown
+
+    def test_start_activates_without_other_spotify_app(self):
+        from unittest.mock import patch
+        session=self.app.sessions[self.sessions[0]]
+        session['host']=True
+        self.api.state['device']['id']='other'
+        self.api.state['is_playing']=False
+        original=self.api.call
+        def call(path,method='GET',payload=None,params=None):
+            result=original(path,method,payload,params)
+            if path=='/me/player' and method=='PUT':
+                self.api.state['device']['id']=payload['device_ids'][0]
+            if path=='/me/player/play':
+                self.api.state['is_playing']=True
+            return result
+        with patch.object(self.api,'call',side_effect=call):
+            self.app.action(self.sessions[0],'/api/host/start',{'device':'speaker'})
+        self.assertTrue(self.app.enabled)
+        self.assertEqual(self.app.device,'speaker')
+        self.app.action(self.sessions[0],'/api/host/stop',{})
+        self.assertFalse(self.app.enabled)
+
+    def test_start_no_context_seeds_local_request(self):
+        from unittest.mock import patch
+        self.app.submit(self.sessions[0],A)
+        self.api.state['item']=None
+        self.api.state['is_playing']=False
+        original=self.api.call
+        def call(path,method='GET',payload=None,params=None):
+            result=original(path,method,payload,params)
+            if path=='/me/player/play':
+                self.api.state['item']={'uri':payload['uris'][0],'duration_ms':100000}
+                self.api.state['is_playing']=True
+            return result
+        with patch.object(self.api,'call',side_effect=call):
+            self.app.start_session('speaker',True)
+        self.assertTrue(self.app.enabled)
+        self.assertEqual(self.app.db.execute('SELECT state FROM songs').fetchone()[0],'playing')
+
+    def test_transfer_not_observed_never_enables(self):
+        from unittest.mock import patch
+        self.api.state['device']['id']='other'
+        with patch.object(w.time,'sleep'),self.assertRaises(f.Failure):
+            self.app.start_session('speaker',True)
+        self.assertFalse(self.app.enabled)
+        self.assertEqual(self.app.health()['status'],'Needs attention')
+
+    def test_guest_start_and_stop_forbidden(self):
+        for route in ('start','stop'):
+            with self.assertRaises(PermissionError):
+                self.app.action(self.sessions[0],'/api/host/'+route,{'device':'speaker'})
+        self.assertFalse(self.api.calls)
+
+    def test_mutation_failure_stops_without_retry(self):
+        self.app.enabled=True
+        self.api.error=f.Failure('timeout',uncertain=True)
+        with self.assertRaises(f.Failure):
+            self.app.start_session('speaker',True)
+        self.assertFalse(self.app.enabled)
+        self.assertEqual(len([c for c in self.api.calls if c[1]!='GET']),1)
