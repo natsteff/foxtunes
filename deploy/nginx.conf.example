@@ -2,7 +2,7 @@
 # Replace 192.168.1.50 with the Docker host's LAN IP.
 server {
     listen 80;
-    server_name foxtunes.nate;
+    server_name unicorntunes.nate;
     location / {
         proxy_pass http://192.168.1.50:8863;
         proxy_set_header Host $http_host;

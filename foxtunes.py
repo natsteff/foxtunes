@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only FoxTunes feasibility CLI. Python standard library only."""
+"""Local-only UnicornTunes feasibility CLI. Python standard library only."""
 import argparse
 import base64
 import hashlib
@@ -202,7 +202,7 @@ def login(data=DATA, open_browser=True):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.end_headers()
-            self.wfile.write(b'Return to the FoxTunes terminal. This window can be closed.')
+            self.wfile.write(b'Return to the UnicornTunes terminal. This window can be closed.')
 
     with http.server.HTTPServer((os.environ.get('FOXTUNES_OAUTH_BIND', '127.0.0.1'), 8765), Callback) as server:
         server.timeout = 1
@@ -258,7 +258,7 @@ def main():
     os.umask(0o077)
     try:
         if args.command == 'setup':
-            client = input('FoxTunes Spotify client ID (not client secret): ').strip()
+            client = input('UnicornTunes Spotify client ID (not client secret): ').strip()
             if not re.fullmatch(r'[a-fA-F0-9]{32}', client):
                 raise Failure('Expected a 32-character Spotify client ID.')
             if (DATA / 'tokens.json').exists():
@@ -271,7 +271,7 @@ def main():
             return
         if args.command == 'logout':
             (DATA / 'tokens.json').unlink(missing_ok=True)
-            print('Local tokens removed. Revoke FoxTunes access in Spotify account settings to disconnect fully.')
+            print('Local tokens removed. Revoke UnicornTunes access in Spotify account settings to disconnect fully.')
             return
         ledger, api = Ledger(DATA), Spotify(DATA)
         if args.command == 'submit':
@@ -340,7 +340,7 @@ def main():
         print(json.dumps(output, indent=2))
     except (Failure, OSError, sqlite3.Error) as error:
         # OS errors can contain paths but never OAuth query data.
-        print('FoxTunes: ' + (str(error) if isinstance(error, Failure) else 'Local operation failed; check permissions, storage and callback port.'))
+        print('UnicornTunes: ' + (str(error) if isinstance(error, Failure) else 'Local operation failed; check permissions, storage and callback port.'))
         return 1
     return 0
 

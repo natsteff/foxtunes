@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local/LAN FoxTunes browser feasibility prototype."""
+"""Local/LAN UnicornTunes browser feasibility prototype."""
 import argparse
 import base64
 import hashlib
@@ -224,7 +224,7 @@ class App:
                 else:
                     seed = next((r for r in self.queue('') if r['state'] == 'waiting'), None)
                     if not seed:
-                        raise f.Failure('Player activated. Request a song in FoxTunes, then press Start session to begin playback.')
+                        raise f.Failure('Player activated. Request a song in UnicornTunes, then press Start session to begin playback.')
                     if self.db.execute("SELECT id FROM songs WHERE state IN ('accepted','queued')").fetchone():
                         raise f.Failure('An earlier handoff remains unresolved. Reconcile it before starting a new track.')
                     self.db.execute("UPDATE songs SET state='sending' WHERE id=?", (seed['id'],))
@@ -460,7 +460,7 @@ def handler(app):
                             return
                         if parsed.path == '/callback':
                             app.oauth_finish(session, query)
-                            self.respond(200, b'<!doctype html><title>FoxTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
+                            self.respond(200, b'<!doctype html><title>UnicornTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
                             return
                         if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js'):
                             name = {'/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
@@ -549,7 +549,7 @@ def main():
                 app.poll()
     thread = threading.Thread(target=worker, daemon=True)
     thread.start()
-    print('FoxTunes: http://127.0.0.1:%s' % args.port, flush=True)
+    print('UnicornTunes: http://127.0.0.1:%s' % args.port, flush=True)
     print('Host page: /host. Password is in private .local-work/runtime/web-host.json', flush=True)
     print('Automatic handoff starts OFF; enable it only for a deliberate host test.', flush=True)
     try:

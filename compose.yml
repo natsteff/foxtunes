@@ -3,7 +3,7 @@ name: foxtunes
 
 services:
   foxtunes:
-    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/unicorntunes:0.1.7}
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/unicorntunes:0.1.8}
     restart: unless-stopped
     init: true
     ports:
@@ -11,8 +11,8 @@ services:
       # Only for optional CLI OAuth via an SSH loopback tunnel.
       - "127.0.0.1:8765:8765"
     environment:
-      FOXTUNES_PUBLIC_URL: ${FOXTUNES_PUBLIC_URL:-http://foxtunes.nate}
-      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:?Set the FoxTunes Spotify Client ID in .env}
+      FOXTUNES_PUBLIC_URL: ${FOXTUNES_PUBLIC_URL:-http://unicorntunes.nate}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:?Set the UnicornTunes Spotify Client ID in .env}
     volumes:
       - foxtunes_data:/data
     read_only: true

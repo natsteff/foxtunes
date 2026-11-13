@@ -1,4 +1,4 @@
-# FoxTunes
+# UnicornTunes
 
 **Docker Compose deployment:** see [DEPLOY.md](DEPLOY.md) for the private image, Nginx Proxy Manager, persistent data and server-side Spotify sign-in.
 
@@ -6,7 +6,7 @@ A local command-line experiment for Spotify host authentication, simulated anony
 
 ## Configure Spotify
 
-1. In the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), create an app named **FoxTunes**. Suggested description: **Private local music-request feasibility test**. Select **Web API** if prompted.
+1. In the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), create an app named **UnicornTunes**. Suggested description: **Private local music-request feasibility test**. Select **Web API** if prompted.
 2. Register this redirect URI exactly: **http://127.0.0.1:8765/callback**.
 3. Save the app and copy its **Client ID**. A client secret is not needed: the harness uses [Authorization Code with PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow).
 4. From this folder, run:
@@ -69,7 +69,7 @@ Tests use temporary databases and mocked Spotify transport. They validate persis
 
 ## Disconnect and data
 
-`python3 foxtunes.py logout` removes stored local tokens. Revoke FoxTunes in Spotify account settings to invalidate access fully. Runtime config, tokens, requests and playback observations are stored locally under `.local-work/runtime/`; these contain private account/activity data. Keep the directory out of backups or protect backups appropriately. The CLI binds only its temporary OAuth callback to loopback and serves no guest interface. Do not expose it as a network service.
+`python3 foxtunes.py logout` removes stored local tokens. Revoke UnicornTunes in Spotify account settings to invalidate access fully. Runtime config, tokens, requests and playback observations are stored locally under `.local-work/runtime/`; these contain private account/activity data. Keep the directory out of backups or protect backups appropriately. The CLI binds only its temporary OAuth callback to loopback and serves no guest interface. Do not expose it as a network service.
 
 ## Browser prototype
 
@@ -89,9 +89,9 @@ python3 -c 'import json; print(json.load(open(".local-work/runtime/web-host.json
 
 Sign in on `/host`. This password protects the host desk; it is separate from Spotify OAuth. Host login does not expose Spotify tokens to the browser. Select the active device and apply settings. Host-only actions include disabling new requests, removing waiting items, pausing/skipping and enabling automatic handoff. Pause/skip turn handoff off. Locked requests cannot be removed from Spotify through this prototype. Reconcile an uncertain/accepted handoff only after checking the actual Spotify queue; it closes the local attempt without asserting completed playback, and stops automatic handoff.
 
-**Handoff defaults OFF on every server start.** To test it, turn off shuffle/repeat in Spotify, start playback on the selected device, select that device in the host desk, check the handoff box and apply. Within the current song's last 15 seconds, FoxTunes sends one highest-voted waiting request to Spotify. The request locks immediately; the remainder stays local and can be voted up. It sends no additional request until the handed-off track is actually observed playing. Network/API errors or device takeover stop the worker. Uncertain mutations are never automatically retried. The host must reconcile and deliberately re-enable after a failure.
+**Handoff defaults OFF on every server start.** To test it, turn off shuffle/repeat in Spotify, start playback on the selected device, select that device in the host desk, check the handoff box and apply. Within the current song's last 15 seconds, UnicornTunes sends one highest-voted waiting request to Spotify. The request locks immediately; the remainder stays local and can be voted up. It sends no additional request until the handed-off track is actually observed playing. Network/API errors or device takeover stop the worker. Uncertain mutations are never automatically retried. The host must reconcile and deliberately re-enable after a failure.
 
-The upcoming panel shows FoxTunes requests, not every item/context already in Spotify. Existing Spotify queue entries, other clients, gaps in polling, unsupported devices and API quotas can affect order/timing. A 15-second handoff is an experimental threshold, not a gapless-playback guarantee. A track leaving playback is recorded as no longer current, not proof it completed. The service polls Spotify once per 20 seconds while idle and once per 5 seconds during handoff; browser refreshes use the shared cached state. A failure backs off for 60 seconds and disables handoff.
+The upcoming panel shows UnicornTunes requests, not every item/context already in Spotify. Existing Spotify queue entries, other clients, gaps in polling, unsupported devices and API quotas can affect order/timing. A 15-second handoff is an experimental threshold, not a gapless-playback guarantee. A track leaving playback is recorded as no longer current, not proof it completed. The service polls Spotify once per 20 seconds while idle and once per 5 seconds during handoff; browser refreshes use the shared cached state. A failure backs off for 60 seconds and disables handoff.
 
 ### Phones on the same trusted LAN
 
@@ -107,16 +107,16 @@ The web prototype uses its own `web.sqlite3` so earlier CLI experiments remain i
 
 ## Starting a dedicated player (v0.1.2+)
 
-On the host desk, select the paired, online Soloist/Connect device and click **Start session**. FoxTunes transfers playback and verifies the target is playing before enabling request handoff. If the player has no playback context, add a request first; FoxTunes uses the highest-voted request as its first track. Start also disables shuffle/repeat. **Stop session** stops new handoffs without stopping the audio. **Move / restart session here** starts the selected destination. These controls replace the earlier handoff checkbox and Apply settings workflow described above. No Spotify desktop app is required for normal startup. Live behavior depends on the account's device-control permissions and the player being available; local control is not implemented as a fallback.
+On the host desk, select the paired, online Soloist/Connect device and click **Start session**. UnicornTunes transfers playback and verifies the target is playing before enabling request handoff. If the player has no playback context, add a request first; UnicornTunes uses the highest-voted request as its first track. Start also disables shuffle/repeat. **Stop session** stops new handoffs without stopping the audio. **Move / restart session here** starts the selected destination. These controls replace the earlier handoff checkbox and Apply settings workflow described above. No Spotify desktop app is required for normal startup. Live behavior depends on the account's device-control permissions and the player being available; local control is not implemented as a fallback.
 
 ## Queue-aware host skip and mobile feedback (v0.1.3+)
 
-**Skip to next request** immediately starts the next FoxTunes request in vote order. Already-handed-off requests are locked ahead of waiting requests and are advanced to without re-queueing them. With no pending requests, Spotify advances normally. Successful skip preserves a running session; failed or uncertain playback confirmation stops handoff for reconciliation. Guests cannot invoke this action. Mobile shows now playing and coming up before search. Request buttons show Adding… while saving and ✓ Requested after success, with a visible confirmation and an updated queue.
+**Skip to next request** immediately starts the next UnicornTunes request in vote order. Already-handed-off requests are locked ahead of waiting requests and are advanced to without re-queueing them. With no pending requests, Spotify advances normally. Successful skip preserves a running session; failed or uncertain playback confirmation stops handoff for reconciliation. Guests cannot invoke this action. Mobile shows now playing and coming up before search. Request buttons show Adding… while saving and ✓ Requested after success, with a visible confirmation and an updated queue.
 
 ## Share the guest page
 
-The header's **Show QR code** button opens a scannable link to the installation's guest page, using `FOXTUNES_PUBLIC_URL` (for example, `http://foxtunes.nate/`). It never includes a host session, password, token or `/host` path. QR rendering runs locally using vendored QRCode.js; no external QR service is called. Guest devices must be able to resolve and reach that address. The supplied UnicornTunes header artwork is used while application, deployment and repository names remain FoxTunes.
+The header's **Show QR code** button opens a scannable link to the installation's guest page, using `FOXTUNES_PUBLIC_URL` (for example, `http://unicorntunes.nate/`). It never includes a host session, password, token or `/host` path. QR rendering runs locally using vendored QRCode.js; no external QR service is called. Guest devices must be able to resolve and reach that address. The user interface uses UnicornTunes branding. Legacy file, configuration and Compose identifiers remain for existing-installation compatibility.
 
 ## Repository name
 
-Source: [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes). Deployments may use `/opt/unicorntunes`; the Compose project remains explicitly `foxtunes` to preserve existing containers and data. Application settings retain the FOXTUNES_* namespace and the guest URL remains configurable (including foxtunes.nate). See the directory-rename instructions in [DEPLOY.md](DEPLOY.md).
+Source: [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes). Deployments may use `/opt/unicorntunes`; the Compose project remains explicitly `foxtunes` to preserve existing containers and data. Application settings retain the FOXTUNES_* namespace and the guest URL remains configurable (including unicorntunes.nate). See the directory-rename instructions in [DEPLOY.md](DEPLOY.md).

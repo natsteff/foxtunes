@@ -1,15 +1,15 @@
-# Deploy FoxTunes with Docker Compose
+# Deploy UnicornTunes with Docker Compose
 
-FoxTunes runs on the Docker host. Spotify audio plays on a separate Connect device, such as a PINE A64+ running Soloist. Install and pair that player separately. This package does not include a Soloist binary.
+UnicornTunes runs on the Docker host. Spotify audio plays on a separate Connect device, such as a PINE A64+ running Soloist. Install and pair that player separately. This package does not include a Soloist binary.
 
 ## Requirements
 
 - Docker Engine and Docker Compose v2 on Linux (amd64 or arm64).
 - A Spotify Premium account and a dedicated Web API app in the Spotify Developer Dashboard.
-- Nginx Proxy Manager or another reverse proxy, plus local DNS for `foxtunes.nate`.
+- Nginx Proxy Manager or another reverse proxy, plus local DNS for `unicorntunes.nate`.
 - A Connect player associated with the same Spotify account.
 
-Use one FoxTunes container per data volume. Separate installations need separate data and configuration. The host's Start session activates the selected Connect player through Spotify's Web API. No other Spotify client needs to be running for this control flow; the player itself must be paired, online and discoverable. Saved named locations are not included yet.
+Use one UnicornTunes container per data volume. Separate installations need separate data and configuration. The host's Start session activates the selected Connect player through Spotify's Web API. No other Spotify client needs to be running for this control flow; the player itself must be paired, online and discoverable. Saved named locations are not included yet.
 
 ## Install
 
@@ -17,8 +17,8 @@ Download `compose.yml` and `.env.example` from [natsteff/unicorntunes](https://g
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.7
-FOXTUNES_PUBLIC_URL=http://foxtunes.nate
+FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.8
+FOXTUNES_PUBLIC_URL=http://unicorntunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
 ```
@@ -46,22 +46,22 @@ The source repository is public; this local-build path requires no GitHub login 
 
 Create a Proxy Host:
 
-- Domain: `foxtunes.nate`
+- Domain: `unicorntunes.nate`
 - Forward scheme: `http`
 - Forward hostname/IP: Docker host's LAN IP
 - Forward port: `8863`
 - Preserve the original Host header (the normal proxy behavior).
 - WebSockets are not required; this version uses HTTP polling.
 
-Local DNS must resolve `foxtunes.nate` to Nginx Proxy Manager from guest phones/tablets too. Add SSL only with a certificate covering this name, whose issuer your devices trust. An internal wildcard certificate may require installing the internal CA on devices. Do not bypass certificate warnings.
+Local DNS must resolve `unicorntunes.nate` to Nginx Proxy Manager from guest phones/tablets too. Add SSL only with a certificate covering this name, whose issuer your devices trust. An internal wildcard certificate may require installing the internal CA on devices. Do not bypass certificate warnings.
 
-If trusted HTTPS works, enable Force SSL and set `FOXTUNES_PUBLIC_URL=https://foxtunes.nate`, then recreate the container with `docker compose up -d`. FoxTunes uses the configured origin for CSRF checks and secure cookies. It does not trust arbitrary forwarded headers or infer TLS from them. The browser must use that exact origin. Keep the backend private so clients access it through Nginx.
+If trusted HTTPS works, enable Force SSL and set `FOXTUNES_PUBLIC_URL=https://unicorntunes.nate`, then recreate the container with `docker compose up -d`. UnicornTunes uses the configured origin for CSRF checks and secure cookies. It does not trust arbitrary forwarded headers or infer TLS from them. The browser must use that exact origin. Keep the backend private so clients access it through Nginx.
 
 See `deploy/nginx.conf.example` for a plain Nginx equivalent. Proxy/certificate/DNS setup is performed on your infrastructure, not by the image.
 
 ## Host login
 
-Visit `http://foxtunes.nate/host` (or HTTPS if configured). A random password is generated on first startup and retained in the data volume. Read it on the server:
+Visit `http://unicorntunes.nate/host` (or HTTPS if configured). A random password is generated on first startup and retained in the data volume. Read it on the server:
 
 ```sh
 docker compose exec foxtunes python -c 'import json; print(json.load(open("/data/web-host.json"))["password"])'
@@ -74,10 +74,10 @@ Keep it private. The host password is separate from Spotify credentials. On plai
 In the Spotify app settings register exactly:
 
 ```text
-https://foxtunes.nate/callback
+https://unicorntunes.nate/callback
 ```
 
-Sign in to the FoxTunes host desk and click **Connect / reconnect Spotify**. Authorize the same account used by the player. Authorization uses PKCE and a short-lived, single-use state, not a client secret. Tokens remain on the server in the volume. Host and guest sessions expire on container restart; Spotify authorization remains.
+Sign in to the UnicornTunes host desk and click **Connect / reconnect Spotify**. Authorize the same account used by the player. Authorization uses PKCE and a short-lived, single-use state, not a client secret. Tokens remain on the server in the volume. Host and guest sessions expire on container restart; Spotify authorization remains.
 
 If Spotify rejects an internal hostname/callback or certificate trust is unavailable, use the loopback flow below. Browser OAuth over the actual private reverse proxy has to be verified in that environment.
 
@@ -107,11 +107,11 @@ The callback listener binds all container interfaces only while this CLI login i
 
 ## Start a listening test
 
-1. Ensure the dedicated player is running and paired with the same Spotify account as FoxTunes.
-2. Request a song in FoxTunes if the player has no existing playback context.
+1. Ensure the dedicated player is running and paired with the same Spotify account as UnicornTunes.
+2. Request a song in UnicornTunes if the player has no existing playback context.
 3. In the host desk, refresh devices, select the player and click **Start session**. This transfers playback, resumes the existing context or starts the top request if there is no context, and turns shuffle/repeat off.
-4. FoxTunes enables automatic handoff only after it observes the selected device playing. Confirm **Running**. No handoff checkbox or manual Spotify app activation is needed.
-5. **Move / restart session here** applies the same flow to the selected target. **Stop session** stops dispatch while current music continues. Host Pause stops dispatch. Skip to next request immediately starts the next FoxTunes request and preserves a running session; when no requests are pending, it advances Spotify normally. A handed-off request is advanced to without adding its URI again. An unconfirmed skip stops dispatch for reconciliation.
+4. UnicornTunes enables automatic handoff only after it observes the selected device playing. Confirm **Running**. No handoff checkbox or manual Spotify app activation is needed.
+5. **Move / restart session here** applies the same flow to the selected target. **Stop session** stops dispatch while current music continues. Host Pause stops dispatch. Skip to next request immediately starts the next UnicornTunes request and preserves a running session; when no requests are pending, it advances Spotify normally. A handed-off request is advanced to without adding its URI again. An unconfirmed skip stops dispatch for reconciliation.
 
 If Spotify refuses transfer/control or does not report playing state, the session stays stopped with an actionable error. Refresh discovery if a device disappears or its ID changes. An accepted command is not playback proof. No local Soloist WebSocket or PINE service configuration is changed by this release.
 
@@ -134,11 +134,11 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.7` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.7` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.8` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.8` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
 
 ## Existing installation: repository / directory rename
 
-The repository is now `https://github.com/natsteff/unicorntunes`. A directory rename must retain the existing Compose project identity. The supplied Compose file explicitly sets `name: foxtunes`, preserving the original `foxtunes-foxtunes-1` container and `foxtunes_foxtunes_data` volume regardless of the checkout directory name. Service/volume keys, FOXTUNES_* settings and foxtunes.nate are retained for compatibility. Changing repository/image names does not migrate or erase runtime data.
+The repository is now `https://github.com/natsteff/unicorntunes`. A directory rename must retain the existing Compose project identity. The supplied Compose file explicitly sets `name: foxtunes`, preserving the original `foxtunes-foxtunes-1` container and `foxtunes_foxtunes_data` volume regardless of the checkout directory name. Service/volume keys and FOXTUNES_* settings are retained for compatibility; the public URL is configurable, with unicorntunes.nate used in new examples. Changing repository/image names does not migrate or erase runtime data.
 
 After moving the checkout to `/opt/unicorntunes` yourself, run:
 
@@ -146,7 +146,7 @@ After moving the checkout to `/opt/unicorntunes` yourself, run:
 cd /opt/unicorntunes
 git remote set-url origin https://github.com/natsteff/unicorntunes.git
 git pull --ff-only
-sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.7|' .env
+sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.8|' .env
 docker compose -f compose.yml -f compose.build.yml config --volumes
 docker compose -f compose.yml -f compose.build.yml up -d --build
 ```
