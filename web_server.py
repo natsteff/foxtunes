@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit, urlencode
 
 import foxtunes as f
 from room import RoomFeatures
+from local_player import LocalPlayback
 
 
 def track(item):
@@ -57,7 +58,7 @@ def search_options(query):
     return ' '.join(parts), title.casefold() if exact else None
 
 
-class App(RoomFeatures):
+class App(RoomFeatures, LocalPlayback):
     def __init__(self, data=f.DATA, api=None):
         self.data, self.api = data, api or f.Spotify(data)
         data.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -99,6 +100,7 @@ class App(RoomFeatures):
         self.password = f.load(hostfile)['password']
         self.room_init()
         self.idle_ready = False
+        self.local_init()
 
     def session(self, sid):
         now = time.time()
@@ -405,6 +407,9 @@ class App(RoomFeatures):
             return {'ok': True}
         if route.startswith('/api/host/') and not session['host']:
             raise PermissionError('Host access required.')
+        handled = self.local_action(sid, route, body)
+        if handled is not None:
+            return handled
         handled = self.room_action(sid, route, body)
         if handled is not None:
             return handled

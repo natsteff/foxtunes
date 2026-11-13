@@ -103,6 +103,8 @@ Spotify may restrict reading playlist contents to playlists the connected accoun
 
 Local-file entries returned by Spotify are visible with a **Local file · Soloist playback not verified** status. They cannot be requested through the existing Spotify-track playback path. This feature does not download playlists, transfer MP3s, or establish native Soloist local-file support.
 
+A separate MPD [local-player connection trial](LOCAL_FILES.md) now provides host-only connection testing and library indexing. Mixed playback and guest search of that library are still pending.
+
 ## Host configuration and room features
 
 - **House Favorites:** curate tracks from host search results; guest browsing is sorted by counted plays. Saved tracks remain marked as favorites in fresh searches.

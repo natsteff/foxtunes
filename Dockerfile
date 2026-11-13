@@ -1,10 +1,11 @@
 FROM python:3.12-slim-bookworm
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 FOXTUNES_DATA_DIR=/data FOXTUNES_OAUTH_BIND=0.0.0.0
+RUN apt-get update && apt-get install -y --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 foxtunes && useradd --uid 10001 --gid 10001 --no-create-home foxtunes && mkdir /data && chown foxtunes:foxtunes /data
 ARG APP_VERSION=0.3.0-dev
 ENV UNICORNTUNES_VERSION=$APP_VERSION
-COPY foxtunes.py web_server.py room.py ./
+COPY foxtunes.py web_server.py room.py local_player.py ./
 COPY web/ ./web/
 USER 10001:10001
 VOLUME ["/data"]

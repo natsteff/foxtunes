@@ -406,6 +406,7 @@ class RoomFeatures:
             if owner:
                 now['requested_by'] = owner[0] or SHY
         return {'now': now, 'profile': {'name': profile['name'] if profile else SHY, 'named': bool(profile and profile['named'])},
+                'local_player': dict(self.local_config, count=self.db.execute('SELECT count(*) FROM local_tracks').fetchone()[0]) if self.sessions.get(sid, {}).get('host') else None,
                 'room': self.room, 'version': os.environ.get('UNICORNTUNES_VERSION', '0.3.0-dev'),
                 'spotify_upcoming': self.spotify_upcoming, 'play_id': current['id'] if current else None,
                 'reactions': reactions, 'background': bool(self.now and not self.db.execute("SELECT 1 FROM songs WHERE state='playing'").fetchone()),

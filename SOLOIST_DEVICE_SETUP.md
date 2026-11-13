@@ -66,7 +66,9 @@ Inspect journal messages locally, then review/redact before sharing. Empty filte
 
 ## Optional local-file player: trial procedure
 
-**Status: installation is in progress. Target-device MPD audio, reboot behavior and coordinated Spotify/local playback remain unverified.**
+**Status: MPD installation, indexing and audible playback have been tested on the trial device. Reboot behavior and coordinated Spotify/local playback remain unverified.**
+
+The next stage is the [Docker-to-player connection trial](LOCAL_FILES.md), using host desk settings and a restricted SSH key.
 
 For a small library, designate a folder under the service user's home:
 
@@ -94,7 +96,7 @@ mpd --version
 
 The package's default system service is disabled because this trial uses a dedicated user service sharing the user's PulseAudio session. On a machine already using MPD, preserve its configuration and service rather than blindly disabling it.
 
-Prepared helper: [setup-local-player.sh](deploy/setup-local-player.sh). Run it as the audio/soloist service user after reviewing it. It has been syntax checked but not yet validated on the target hardware. It:
+Prepared helper: [setup-local-player.sh](deploy/setup-local-player.sh). Run it as the audio/soloist service user after reviewing it. It has been used on the trial playback device. It:
 
 - Checks for MPD/mpc and the pulse output plugin.
 - Uses the designated music folder and dedicated per-user configuration/state directories.
