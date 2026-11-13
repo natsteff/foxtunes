@@ -50,6 +50,10 @@ Use the same two commands for future releases. Numbered image tags are also publ
 
 The Compose project remains `foxtunes` to preserve existing container/network/volume identity. `FOXTUNES_*` settings and internal filenames are retained for compatibility. Keep your current data volume when updating.
 
+## Playback-device setup and rebuilds
+
+See [SOLOIST_DEVICE_SETUP.md](SOLOIST_DEVICE_SETUP.md) for the Linux/Soloist/audio setup, rebuild checklist and optional MPD trial. Confirmed observations and pending validation are marked separately.
+
 ## First session
 
 1. Start Soloist on the playback device and pair it through Spotify. Confirm audio reaches the stereo.
