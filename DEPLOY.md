@@ -17,7 +17,7 @@ Download `compose.yml` and `.env.example` from [natsteff/unicorntunes](https://g
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.8
+FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.9
 FOXTUNES_PUBLIC_URL=http://unicorntunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -134,7 +134,7 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.8` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.8` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.9` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.9` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
 
 ## Existing installation: repository / directory rename
 
@@ -146,7 +146,7 @@ After moving the checkout to `/opt/unicorntunes` yourself, run:
 cd /opt/unicorntunes
 git remote set-url origin https://github.com/natsteff/unicorntunes.git
 git pull --ff-only
-sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.8|' .env
+sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.9|' .env
 docker compose -f compose.yml -f compose.build.yml config --volumes
 docker compose -f compose.yml -f compose.build.yml up -d --build
 ```
