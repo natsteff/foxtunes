@@ -3,7 +3,7 @@ name: foxtunes
 
 services:
   foxtunes:
-    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/unicorntunes:0.1.9}
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/unicorntunes:latest}
     restart: unless-stopped
     init: true
     ports:

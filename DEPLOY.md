@@ -17,7 +17,7 @@ Download `compose.yml` and `.env.example` from [natsteff/unicorntunes](https://g
 
 ```dotenv
 SPOTIFY_CLIENT_ID=your_32_character_client_id
-FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.9
+FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:latest
 FOXTUNES_PUBLIC_URL=http://unicorntunes.nate
 FOXTUNES_BIND_IP=192.168.1.50
 FOXTUNES_PORT=8863
@@ -121,7 +121,7 @@ Failed settings validation preserves the last valid configuration. Device takeov
 
 The `foxtunes_data` named volume contains requests/votes, host password, Spotify tokens, selected device and request acceptance setting. Handoff deliberately starts stopped after container restart; verify the device and re-enable it. This avoids unexpected playback changes after maintenance. Browser sessions are not persisted; clearing cookies/restarting creates a new anonymous identity.
 
-For updates, change `FOXTUNES_IMAGE` to the desired version, then:
+For updates, keep `FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:latest`, then:
 
 ```sh
 docker compose pull
@@ -134,7 +134,7 @@ To roll back, stop the service and restore the previous image tag and its matchi
 
 ## Publishing a version
 
-The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.9` tag publishes `ghcr.io/natsteff/unicorntunes:0.1.9` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
+The repository's GitHub Actions workflow runs tests on main/PRs. A version tag publishes both its numbered image and `ghcr.io/natsteff/unicorntunes:latest` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.
 
 ## Existing installation: repository / directory rename
 
@@ -146,7 +146,7 @@ After moving the checkout to `/opt/unicorntunes` yourself, run:
 cd /opt/unicorntunes
 git remote set-url origin https://github.com/natsteff/unicorntunes.git
 git pull --ff-only
-sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:0.1.9|' .env
+sed -i 's|^FOXTUNES_IMAGE=.*|FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:latest|' .env
 docker compose -f compose.yml -f compose.build.yml config --volumes
 docker compose -f compose.yml -f compose.build.yml up -d --build
 ```
