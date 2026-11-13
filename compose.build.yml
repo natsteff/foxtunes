@@ -1,0 +1,4 @@
+services:
+  foxtunes:
+    build: .
+    pull_policy: build

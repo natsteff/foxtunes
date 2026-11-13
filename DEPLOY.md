@@ -1,0 +1,135 @@
+# Deploy FoxTunes with Docker Compose
+
+FoxTunes runs on the Docker host. Spotify audio plays on a separate Connect device, such as a PINE A64+ running Soloist. Install and pair that player separately. This package does not include a Soloist binary.
+
+## Requirements
+
+- Docker Engine and Docker Compose v2 on Linux (amd64 or arm64).
+- A Spotify Premium account and a dedicated Web API app in the Spotify Developer Dashboard.
+- Nginx Proxy Manager or another reverse proxy, plus local DNS for `foxtunes.nate`.
+- A Connect player associated with the same Spotify account.
+
+Use one FoxTunes container per data volume. Separate installations need separate data and configuration. This release retains the prototype's manual device activation; saved locations and Start/Move session controls are not included yet.
+
+## Install
+
+Download `compose.yml` and `.env.example` from the private repository into a server directory. Copy `.env.example` to `.env` and edit:
+
+```dotenv
+SPOTIFY_CLIENT_ID=your_32_character_client_id
+FOXTUNES_IMAGE=ghcr.io/natsteff/foxtunes:0.1.0
+FOXTUNES_PUBLIC_URL=http://foxtunes.nate
+FOXTUNES_BIND_IP=192.168.1.50
+FOXTUNES_PORT=8787
+```
+
+Replace `192.168.1.50` with the Docker host's LAN IP. If Nginx runs directly on that host, use `127.0.0.1` instead. A separate Nginx Proxy Manager container cannot reach the host's loopback address as its upstream. Restrict the backend port to your trusted LAN/proxy; do not expose it on your router.
+
+The image is private. Authenticate the Docker server to GHCR using a GitHub personal access token (classic) with `read:packages` and package access. Enter it at the password prompt; do not put it in Compose or `.env`:
+
+```sh
+docker login ghcr.io -u YOUR_GITHUB_USERNAME
+docker compose pull
+docker compose up -d
+docker compose ps
+```
+
+GitHub's [registry authentication guide](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry) covers private-package access. If downloading the source instead, build locally:
+
+```sh
+docker compose -f compose.yml -f compose.build.yml up -d --build
+```
+
+This path needs access to the private source repository but not to the GHCR image. For subsequent local-build operations, continue using both Compose files.
+
+## Nginx Proxy Manager
+
+Create a Proxy Host:
+
+- Domain: `foxtunes.nate`
+- Forward scheme: `http`
+- Forward hostname/IP: Docker host's LAN IP
+- Forward port: `8787`
+- Preserve the original Host header (the normal proxy behavior).
+- WebSockets are not required; this version uses HTTP polling.
+
+Local DNS must resolve `foxtunes.nate` to Nginx Proxy Manager from guest phones/tablets too. Add SSL only with a certificate covering this name, whose issuer your devices trust. An internal wildcard certificate may require installing the internal CA on devices. Do not bypass certificate warnings.
+
+If trusted HTTPS works, enable Force SSL and set `FOXTUNES_PUBLIC_URL=https://foxtunes.nate`, then recreate the container with `docker compose up -d`. FoxTunes uses the configured origin for CSRF checks and secure cookies. It does not trust arbitrary forwarded headers or infer TLS from them. The browser must use that exact origin. Keep the backend private so clients access it through Nginx.
+
+See `deploy/nginx.conf.example` for a plain Nginx equivalent. Proxy/certificate/DNS setup is performed on your infrastructure, not by the image.
+
+## Host login
+
+Visit `http://foxtunes.nate/host` (or HTTPS if configured). A random password is generated on first startup and retained in the data volume. Read it on the server:
+
+```sh
+docker compose exec foxtunes python -c 'import json; print(json.load(open("/data/web-host.json"))["password"])'
+```
+
+Keep it private. The host password is separate from Spotify credentials. On plain HTTP, host passwords and session cookies are unencrypted; use only a trusted LAN for testing. To replace it, stop the container, update `web-host.json` securely in the volume, and restart; do not publish that file. Guest browsers never receive Spotify tokens.
+
+## Spotify login: trusted HTTPS
+
+In the Spotify app settings register exactly:
+
+```text
+https://foxtunes.nate/callback
+```
+
+Sign in to the FoxTunes host desk and click **Connect / reconnect Spotify**. Authorize the same account used by the player. Authorization uses PKCE and a short-lived, single-use state, not a client secret. Tokens remain on the server in the volume. Host and guest sessions expire on container restart; Spotify authorization remains.
+
+If Spotify rejects an internal hostname/callback or certificate trust is unavailable, use the loopback flow below. Browser OAuth over the actual private reverse proxy has to be verified in that environment.
+
+## Spotify login: HTTP / loopback fallback
+
+Spotify permits HTTP callbacks on explicit loopback IPs. Register this additional callback in the Spotify app:
+
+```text
+http://127.0.0.1:8765/callback
+```
+
+The Compose package publishes port 8765 only on the Docker host's loopback interface. From your laptop/desktop, keep an SSH tunnel open (replace the destination):
+
+```sh
+ssh -N -L 8765:127.0.0.1:8765 user@DOCKER_HOST
+```
+
+In another SSH terminal on the Docker server:
+
+```sh
+docker compose exec foxtunes python foxtunes.py login --no-browser
+```
+
+Open the printed authorization URL in the laptop/desktop browser while the tunnel is open. Complete Spotify login within three minutes. The browser callback travels through the tunnel to the container. Do not share the temporary URL. This writes the same server-side token file used by the web worker. Do not run separate sign-ins/refresh tools concurrently. Close the tunnel after success.
+
+The callback listener binds all container interfaces only while this CLI login is running; Docker exposes it only through host loopback. Do not publish callback port 8765 to the LAN. No existing Mac token file needs to be copied.
+
+## Start a listening test
+
+1. Start Spotify playback on the intended speaker/player using Spotify Connect.
+2. In the FoxTunes host desk, select that active device. Turn Spotify shuffle/repeat off.
+3. Enable handoff and apply. Confirm **Running**.
+4. Open the guest page on phones/tablet. Search, request and vote.
+5. FoxTunes sends one request near the current song's end and waits to observe it playing. Remaining requests stay local so votes can reorder them.
+
+Failed settings validation preserves the last valid configuration. Device takeover/API failures stop handoff with a persistent **Needs attention** reason; a later successful status read does not hide that stop. Settings controls reflect server state after a failed save. Existing Spotify queued items can still precede a new request. A request disappearing from current playback is not proof of full playback or audible sound.
+
+## Persistence, updates and rollback
+
+The `foxtunes_data` named volume contains requests/votes, host password, Spotify tokens, selected device and request acceptance setting. Handoff deliberately starts stopped after container restart; verify the device and re-enable it. This avoids unexpected playback changes after maintenance. Browser sessions are not persisted; clearing cookies/restarting creates a new anonymous identity.
+
+For updates, change `FOXTUNES_IMAGE` to the desired version, then:
+
+```sh
+docker compose pull
+docker compose up -d
+```
+
+Do not use `down -v` unless you intentionally want to delete all data. Before updates, stop the container and take a protected snapshot/backup of the volume using your Docker host's backup tools. Keep credentials and listening activity private. Restart after the backup. SQLite must be backed up consistently; do not copy a changing database file by itself.
+
+To roll back, stop the service and restore the previous image tag and its matching volume backup if a newer release changed the data schema. Version 0.1.0 adds settings storage without changing the earlier web database schema. There is no automatic updater or public internet exposure.
+
+## Publishing a version
+
+The repository's GitHub Actions workflow runs tests on main/PRs. A `v0.1.0` tag publishes `ghcr.io/natsteff/foxtunes:0.1.0` for amd64 and arm64 using the repository's scoped `GITHUB_TOKEN`. The first GHCR publication defaults private; verify package visibility/access after publication. Grant server users read access as needed. No personal GHCR write credential is stored in the repository. Tests, private records and runtime data are excluded from the image by an allowlist build context.

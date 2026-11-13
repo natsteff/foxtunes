@@ -1,0 +1,29 @@
+services:
+  foxtunes:
+    image: ${FOXTUNES_IMAGE:-ghcr.io/natsteff/foxtunes:0.1.0}
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${FOXTUNES_BIND_IP:-127.0.0.1}:${FOXTUNES_PORT:-8787}:8787"
+      # Only for optional CLI OAuth via an SSH loopback tunnel.
+      - "127.0.0.1:8765:8765"
+    environment:
+      FOXTUNES_PUBLIC_URL: ${FOXTUNES_PUBLIC_URL:-http://foxtunes.nate}
+      SPOTIFY_CLIENT_ID: ${SPOTIFY_CLIENT_ID:?Set the FoxTunes Spotify Client ID in .env}
+    volumes:
+      - foxtunes_data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"
+volumes:
+  foxtunes_data:

@@ -1,0 +1,9 @@
+.local-work/
+.env
+.env.*
+!.env.example
+__pycache__/
+*.sqlite3
+.DS_Store
+*.tar
+*.tar.gz
