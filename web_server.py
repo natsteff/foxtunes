@@ -20,15 +20,15 @@ from room import RoomFeatures
 
 
 def track(item):
-    return {'uri': item.get('uri'), 'name': item.get('name', 'Unknown track'),
-            'artists': ', '.join(a['name'] for a in item.get('artists', [])),
-            'art': next((i['url'] for i in (item.get('album') or {}).get('images', [])[-1:]), ''),
+    return {'uri': item.get('uri'), 'name': item.get('name') or 'Unknown track',
+            'artists': ', '.join(a.get('name') or 'Unknown artist' for a in (item.get('artists') or [])),
+            'art': next((i['url'] for i in ((item.get('album') or {}).get('images') or [])[-1:]), ''),
             'url': (item.get('external_urls') or {}).get('spotify', ''),
-            'duration_ms': item.get('duration_ms', 0),
+            'duration_ms': item.get('duration_ms') or 0,
             'album': (item.get('album') or {}).get('name', ''),
-            'year': (item.get('album') or {}).get('release_date', '')[:4],
+            'year': ((item.get('album') or {}).get('release_date') or '')[:4],
             'explicit': item.get('explicit'),
-            'artist_names': [a['name'] for a in item.get('artists', [])]}
+            'artist_names': [a.get('name') or 'Unknown artist' for a in (item.get('artists') or [])]}
 
 
 def search_options(query):
@@ -440,7 +440,7 @@ def handler(app):
             self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
-            self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+            self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co https://mosaic.scdn.co https://image-cdn-ak.spotifycdn.com data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
             if cookie:
                 self.send_header('Set-Cookie', 'ft_session=' + cookie + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800' + ('; Secure' if app.public_url.startswith('https://') else ''))
             if getattr(self, 'guest_token', None):
@@ -493,12 +493,20 @@ def handler(app):
                             app.oauth_finish(session, query)
                             self.respond(200, b'<!doctype html><title>UnicornTunes connected</title><p>Spotify connected. <a href="/host">Return to host desk</a></p>', 'text/html')
                             return
-                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js', '/room.js', '/room.css', '/display'):
-                            name = {'/room.js': 'room.js', '/room.css': 'room.css', '/display': 'index.html', '/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
-                            content = {'room.js': 'text/javascript', 'room.css': 'text/css', 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png', 'vendor/qrcode.min.js': 'text/javascript'}[name]
+                        if parsed.path in ('/', '/host', '/app.js', '/style.css', '/foxtunes-logo.png', '/vendor/qrcode.min.js', '/room.js', '/room.css', '/display', '/playlists.js'):
+                            name = {'/playlists.js': 'playlists.js', '/room.js': 'room.js', '/room.css': 'room.css', '/display': 'index.html', '/': 'index.html', '/host': 'index.html', '/app.js': 'app.js', '/style.css': 'style.css', '/foxtunes-logo.png': 'foxtunes-logo.png', '/vendor/qrcode.min.js': 'vendor/qrcode.min.js'}[parsed.path]
+                            content = {'playlists.js': 'text/javascript', 'room.js': 'text/javascript', 'room.css': 'text/css', 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript', 'style.css': 'text/css', 'foxtunes-logo.png': 'image/png', 'vendor/qrcode.min.js': 'text/javascript'}[name]
                             self.respond(200, (Path(__file__).parent / 'web' / name).read_bytes(), content, sid)
                             return
-                        if parsed.path == '/api/favorites':
+                        if parsed.path == '/api/host/playlists':
+                            app.limit(('playlists', sid), 30)
+                            payload = app.list_playlists(sid, query)
+                        elif parsed.path == '/api/playlists':
+                            payload = {'items': [json.loads(r[0]) for r in app.db.execute('SELECT metadata FROM shared_playlists ORDER BY created,id')]}
+                        elif parsed.path == '/api/playlist-items':
+                            app.limit(('playlist-items', sid), 30)
+                            payload = app.playlist_tracks(sid, query.get('id', [''])[0], int(query.get('offset', ['0'])[0]))
+                        elif parsed.path == '/api/favorites':
                             payload = {'items': app.favorites()}
                         elif parsed.path == '/api/stats':
                             payload = app.stats(query.get('period', ['tonight'])[0], sid)

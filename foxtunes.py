@@ -19,7 +19,7 @@ import webbrowser
 ROOT = Path(__file__).resolve().parent
 DATA = Path(os.environ.get('FOXTUNES_DATA_DIR', ROOT / '.local-work' / 'runtime'))
 REDIRECT = 'http://127.0.0.1:8765/callback'
-SCOPES = 'user-read-playback-state user-read-currently-playing user-modify-playback-state'
+SCOPES = 'user-read-playback-state user-read-currently-playing user-modify-playback-state playlist-read-private playlist-read-collaborative'
 TRACK = re.compile(r'^spotify:track:[A-Za-z0-9]{22}$')
 
 

@@ -33,6 +33,7 @@ class RoomFeatures:
         self.db.executescript('''
           CREATE TABLE IF NOT EXISTS guests(id TEXT PRIMARY KEY,name TEXT NOT NULL,named INTEGER DEFAULT 0);
           CREATE TABLE IF NOT EXISTS room_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS shared_playlists(id TEXT PRIMARY KEY,metadata TEXT NOT NULL,created REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS favorites(uri TEXT PRIMARY KEY,metadata TEXT NOT NULL,created REAL NOT NULL);
           CREATE TABLE IF NOT EXISTS plays(id INTEGER PRIMARY KEY,song INTEGER,uri TEXT NOT NULL,metadata TEXT NOT NULL,
             requester TEXT,guest TEXT,gathering INTEGER,started REAL NOT NULL,listened REAL DEFAULT 0,
@@ -74,6 +75,7 @@ class RoomFeatures:
             self.set_meta('gathering_started', time.time())
         self.spotify_upcoming = {'items': [], 'updated': 0, 'error': ''}
         self.upcoming_due = 0
+        self.playlist_cache = {}
         # Across restarts, never infer elapsed listening from wall-clock downtime.
         self.db.execute("UPDATE plays SET outcome='unknown' WHERE outcome='observing'")
         self.db.commit()
@@ -179,6 +181,8 @@ class RoomFeatures:
                 raise f.Failure('This song was played recently. Try another favorite.')
 
     def submit(self, sid, uri):
+        if not f.TRACK.fullmatch(str(uri)):
+            raise f.Failure('Local files cannot be requested until playback support is verified.')
         if not self.accepting:
             raise f.Failure('The host has paused new requests.')
         favorite = self.db.execute('SELECT metadata FROM favorites WHERE uri=?', (uri,)).fetchone()
@@ -264,6 +268,83 @@ class RoomFeatures:
         except f.Failure as error:
             self.spotify_upcoming['error'] = str(error)
 
+    @staticmethod
+    def playlist_summary(item):
+        return {'id': item.get('id'), 'name': item.get('name') or 'Untitled playlist',
+                'artists': (item.get('owner') or {}).get('display_name') or (item.get('owner') or {}).get('id', ''),
+                'art': next((i.get('url', '') for i in item.get('images') or []), ''),
+                'url': (item.get('external_urls') or {}).get('spotify', ''),
+                'total': (item.get('items') or item.get('tracks') or {}).get('total'),
+                'public': item.get('public')}
+
+    def playlist_call(self, path, params=None):
+        try:
+            return self.api.call(path, params=params)
+        except f.Failure as error:
+            if '403' in str(error) or '401' in str(error):
+                raise f.Failure('Playlist access denied. Reconnect Spotify from the host desk to grant playlist read access. Spotify may restrict track browsing to playlists this account owns or collaborates on.')
+            raise
+
+    def list_playlists(self, sid, query):
+        if not self.sessions[sid]['host']:
+            raise PermissionError('Host access required.')
+        offset = int(query.get('offset', ['0'])[0])
+        if not 0 <= offset <= 100000:
+            raise f.Failure('Invalid playlist page.')
+        text = query.get('q', [''])[0].strip()
+        if len(text) > 150:
+            raise f.Failure('Playlist search must be at most 150 characters.')
+        if text:
+            if offset > 990:
+                raise f.Failure('No more search pages.')
+            result = self.playlist_call('/search', {'q': text, 'type': 'playlist', 'limit': 10, 'offset': offset}).get('playlists', {})
+            step = 10
+        else:
+            result = self.playlist_call('/me/playlists', {'limit': 50, 'offset': offset})
+            step = 50
+        enabled = {r[0] for r in self.db.execute('SELECT id FROM shared_playlists')}
+        return {'items': [dict(self.playlist_summary(x), enabled=x.get('id') in enabled) for x in result.get('items', []) if x and x.get('id')],
+                'more': bool(result.get('next')) and offset + step <= (990 if text else 100000), 'next_offset': offset + step}
+
+    def playlist_tracks(self, sid, playlist_id, offset=0):
+        if not f.re.fullmatch(r'[A-Za-z0-9]{22}', playlist_id) or not 0 <= offset <= 100000:
+            raise f.Failure('Invalid playlist or page.')
+        shared = self.db.execute('SELECT metadata FROM shared_playlists WHERE id=?', (playlist_id,)).fetchone()
+        host = self.sessions[sid]['host']
+        if not host and not shared:
+            raise PermissionError('This playlist is not enabled for guests.')
+        key = (playlist_id, offset)
+        cached = self.playlist_cache.get(key)
+        if cached and time.monotonic() < cached[0]:
+            result = copy.deepcopy(cached[1])
+        else:
+            from web_server import track
+            summary = json.loads(shared[0]) if shared else self.playlist_summary(self.playlist_call('/playlists/' + playlist_id))
+            page = self.playlist_call('/playlists/' + playlist_id + '/items', {'limit': 50, 'offset': offset})
+            items = []
+            for entry in page.get('items', []):
+                raw = (entry or {}).get('item') or (entry or {}).get('track')
+                if not raw:
+                    items.append({'name': 'Unavailable track', 'artists': '', 'requestable': False, 'reason': 'Spotify did not return this item.'})
+                    continue
+                local = bool(entry.get('is_local') or raw.get('is_local') or str(raw.get('uri', '')).startswith('spotify:local:'))
+                song = track(raw)
+                requestable = not local and bool(f.TRACK.fullmatch(str(song['uri']))) and raw.get('is_playable') is not False
+                items.append(dict(song, is_local=local, requestable=requestable,
+                                  reason='Local file · Soloist playback not verified' if local else ('' if requestable else 'Unavailable or not a supported music track')))
+            result = {'playlist': summary, 'items': items, 'more': bool(page.get('next')) and offset + 50 <= 100000,
+                      'next_offset': offset + 50}
+            if len(self.playlist_cache) >= 100:
+                self.playlist_cache.clear()
+            self.playlist_cache[key] = (time.monotonic() + 30, copy.deepcopy(result))
+        if len(self.catalog) > 2000:
+            self.catalog.clear()
+        for song in result['items']:
+            if song.get('requestable'):
+                song['house_favorite'] = bool(self.db.execute('SELECT 1 FROM favorites WHERE uri=?', (song['uri'],)).fetchone())
+                self.catalog[song['uri']] = song
+        return result
+
     def favorites(self):
         return [dict(json.loads(r['metadata']), plays=r['plays']) for r in self.db.execute('''
           SELECT f.*, (SELECT count(*) FROM plays p WHERE p.uri=f.uri AND p.qualified=1) AS plays
@@ -325,7 +406,7 @@ class RoomFeatures:
             if owner:
                 now['requested_by'] = owner[0] or SHY
         return {'now': now, 'profile': {'name': profile['name'] if profile else SHY, 'named': bool(profile and profile['named'])},
-                'room': self.room, 'version': os.environ.get('UNICORNTUNES_VERSION', '0.2.0-dev'),
+                'room': self.room, 'version': os.environ.get('UNICORNTUNES_VERSION', '0.3.0-dev'),
                 'spotify_upcoming': self.spotify_upcoming, 'play_id': current['id'] if current else None,
                 'reactions': reactions, 'background': bool(self.now and not self.db.execute("SELECT 1 FROM songs WHERE state='playing'").fetchone()),
                 'gathering': self.meta('gathering'), 'presets': PRESETS if self.sessions.get(sid, {}).get('host') else {}}
@@ -346,6 +427,20 @@ class RoomFeatures:
             if not play or reaction not in ('love', 'fire', 'great-pick'):
                 raise f.Failure('Choose a reaction to the current song.')
             self.db.execute('INSERT OR REPLACE INTO reactions VALUES(?,?,?)', (play['id'], guest, reaction))
+            self.db.commit()
+        elif route == '/api/host/playlist':
+            playlist_id = str(body.get('id', ''))
+            if not f.re.fullmatch(r'[A-Za-z0-9]{22}', playlist_id):
+                raise f.Failure('Invalid playlist ID.')
+            if body.get('remove'):
+                self.db.execute('DELETE FROM shared_playlists WHERE id=?', (playlist_id,))
+            else:
+                # Verify contents access before exposing private playlist details to guests.
+                data = self.playlist_tracks(sid, playlist_id)
+                if self.db.execute('SELECT count(*) FROM shared_playlists').fetchone()[0] >= 100 and not self.db.execute('SELECT 1 FROM shared_playlists WHERE id=?', (playlist_id,)).fetchone():
+                    raise f.Failure('At most 100 guest playlists can be enabled.')
+                self.db.execute('INSERT OR REPLACE INTO shared_playlists VALUES(?,?,?)',
+                                (playlist_id, json.dumps(data['playlist']), time.time()))
             self.db.commit()
         elif route == '/api/host/favorite':
             uri = body.get('uri')

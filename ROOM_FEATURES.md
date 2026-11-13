@@ -29,7 +29,7 @@ Authenticated `/host` users can:
 - Customize all five text areas, select suggested wording, hide the eyebrow, or restore the original wording. All five original defaults are retained. Custom text is rendered as text, never HTML.
 - Set the timezone used for month boundaries. Default: America/Chicago.
 
-The header displays the build's actual version, supplied to Docker through APP_VERSION at release time. Source runs show `0.2.0-dev` unless UNICORNTUNES_VERSION is set.
+The header displays the build's actual version, supplied to Docker through APP_VERSION at release time. Source runs show `0.3.0-dev` unless UNICORNTUNES_VERSION is set.
 
 ## Observations, history, and stats
 
@@ -48,3 +48,10 @@ The guest view distinguishes requests open/paused, handoff status, playback paus
 Use `ghcr.io/natsteff/unicorntunes:latest` or the numbered `0.2.0` tag. Existing volumes, credentials, queue and configuration are retained. Before migrating a database with requests, the application creates a private `web-pre-0.2.0.sqlite3` backup in the data directory. Host handoff starts stopped after restart.
 
 Automated tests cover identity persistence, authorization, vote attribution, guaranteed turns, third-oldest selection, protected reservations, failed-operation holds, migration, music rules, favorites, stats, reactions, locations and observed play counts. Browser checks cover real Spotify search, guest onboarding, host configuration save, Room stats, and phone/tablet layouts. Audible long-run playback acceptance remains to be verified on the deployment.
+
+
+## Host-selected playlists (0.3.0)
+
+Hosts can browse their Spotify library, filter loaded pages, search Spotify playlists or open a playlist link/ID. Enabling a playlist verifies contents access and shares its metadata/tracks with guests; disabling it blocks further guest reads even while a cached page exists. Guests browse enabled playlists and request individual supported tracks through the existing queue. Local-file entries remain visible but cannot be requested until playback support is established.
+
+Existing Spotify authorization must be renewed for playlist-read-private and playlist-read-collaborative. Spotify may limit track access to owned/collaborative playlists. Playlist discovery does not override that restriction. This feature provides no playlist downloads or MP3 transfer.

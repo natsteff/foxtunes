@@ -152,3 +152,8 @@ docker compose -f compose.yml -f compose.build.yml up -d --build
 ```
 
 Keep the existing `.env` and volume. Do not run `down -v`. If a shell or `.env` already sets `COMPOSE_PROJECT_NAME`, it overrides the file: ensure it is `foxtunes` for this existing installation. Do not use `-p unicorntunes` with the existing data. A separate future installation can intentionally use a different `-p` project with its own data. The old GHCR package is not renamed or removed; this release publishes to the new `unicorntunes` image path. Existing `.env` files must update FOXTUNES_IMAGE explicitly, because they override the Compose default.
+
+
+## Playlist browsing permissions (v0.3.0+)
+
+After upgrading, reconnect Spotify once to grant `playlist-read-private` and `playlist-read-collaborative`. Use the trusted HTTPS flow or the HTTP/loopback fallback above. Refreshing a previously granted token does not expand its permissions. In the host desk, use Guest playlist selection to enable playlists after contents access is verified. Enabling a private playlist shares its returned metadata/tracks with guest browsers. Spotify may restrict item access to owned/collaborative playlists. Local-file rows are informational; no local-file sync/download is performed.

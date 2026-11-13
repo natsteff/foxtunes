@@ -4,130 +4,129 @@
 
 # UnicornTunes
 
-**Docker Compose deployment:** see [DEPLOY.md](DEPLOY.md) for the private image, Nginx Proxy Manager, persistent data and server-side Spotify sign-in.
+**A shared music-request jukebox with a Docker-hosted web interface and a separate Spotify Soloist playback device.**
 
-A local command-line experiment for Spotify host authentication, simulated anonymous requests, device discovery and playback observations. Requires Python 3.9+; no packages to install. This is an early test tool, not the full jukebox or a phone-accessible PWA.
+Guests open a URL or scan a QR code to search music, browse host-selected playlists and House Favorites, request songs, and vote. The host controls the session, music rules and room configuration through `/host`. Spotify Soloist runs on a separate playback device connected to the stereo; it is not included in the UnicornTunes Docker image.
 
-## Configure Spotify
+## How it works
 
-1. In the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), create an app named **UnicornTunes**. Suggested description: **Private local music-request feasibility test**. Select **Web API** if prompted.
-2. Register this redirect URI exactly: **http://127.0.0.1:8765/callback**.
-3. Save the app and copy its **Client ID**. A client secret is not needed: the harness uses [Authorization Code with PKCE](https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow).
-4. From this folder, run:
-
-```sh
-python3 foxtunes.py setup
-python3 foxtunes.py login
+```mermaid
+flowchart LR
+    Guests[Phones / tablet browser] --> App[UnicornTunes Docker web app + SQLite]
+    App --> Spotify[Spotify Web API / Spotify service]
+    Spotify --> Player[Separate playback device running Soloist]
+    Player --> Stereo[Stereo / speakers]
 ```
 
-Paste the Client ID into the local terminal prompt. Login opens Spotify in the browser and waits three minutes for the callback. Use the same computer for browser and CLI. Port 8765 must be available. `login --no-browser` prints a temporary authorization URL for manual opening on that computer; keep that URL private.
+UnicornTunes manages requests, fairness, votes, guest identity, curation and history. Spotify's service delivers audio to Soloist. The browser and Docker web app do not decode or output the music. Playback control currently uses Spotify's Web API; Soloist's optional local WebSocket API is not required or exposed to guests.
 
-The host needs Premium. If an additional account is used, check the app's allowed users. Scopes requested are playback read, currently playing read and playback modify. Tokens stay in ignored local files with owner-only permissions. Never paste credentials into chat or commit runtime files.
+## Requirements
 
-## First live test
+- A Docker host with Docker Compose and a persistent data volume.
+- A **separate playback device running [Spotify Soloist](https://developer.spotify.com/documentation/soloist)**, with working audio output to the stereo. The current installation uses a Pine64 Linux device. Follow Spotify's supported platform and audio requirements.
+- A Spotify Premium host account, a Spotify Web API application, and a Soloist API key. Pair Soloist with the same account authorized in UnicornTunes.
+- A URL reachable by guest phones and the tablet. Use trusted HTTPS for normal browser sign-in; an HTTP installation can use the documented loopback OAuth fallback.
 
-Open the official Spotify app on a computer or another Connect device, play a song, and keep it awake. Start at low volume. No operating-system reinstall is required.
+The Web API Client ID/OAuth authorization, Soloist API key and UnicornTunes host password serve different purposes. Soloist's key stays on the playback device; guest browsers never receive Spotify tokens.
 
-```sh
-python3 foxtunes.py devices
-python3 foxtunes.py search "song artist"
+## Deploy and update
+
+Follow **[DEPLOY.md](DEPLOY.md)** for complete setup, persistent storage, reverse proxy, host password and Spotify authorization instructions.
+
+The standard image is:
+
+```env
+FOXTUNES_IMAGE=ghcr.io/natsteff/unicorntunes:latest
 ```
 
-Record a nonrestricted device ID and choose three different track URIs from search results. Replace the capitalized placeholders below with actual values; they are not runnable examples as written.
+After preparing `compose.yml` and `.env` as described in the deployment guide:
 
 ```sh
-python3 foxtunes.py three-guests TRACK_URI_A TRACK_URI_B TRACK_URI_C
-python3 foxtunes.py status
-python3 foxtunes.py transfer --device DEVICE_ID --confirm
-python3 foxtunes.py observe
-python3 foxtunes.py dispatch --device DEVICE_ID
-python3 foxtunes.py spotify-queue
-python3 foxtunes.py observe
+docker compose pull
+docker compose up -d
 ```
 
-`three-guests` simulates three independent guest labels locally. It needs no Spotify login and saves all three requests atomically. It does not demonstrate remote browser sessions, authentication isolation over a network, or music playback. Alternatively use `submit --guest guest-1 TRACK_URI`.
+Use the same two commands for future releases. Numbered image tags are also published for rollback. The running build version appears beneath the logo. Refresh the page after an update.
 
-`dispatch` sends the oldest requested track, one at a time, to Spotify's existing queue. It does not start that track immediately. Wait for it to become current, then run `observe` again. Only a matching track playing on its selected device changes the request to `observed-playing`; completion and audible output are never inferred. After that observation, dispatch the next request. Existing Spotify queue items may play first. Do not clear a personal queue implicitly or assume the test controls external clients.
+The Compose project remains `foxtunes` to preserve existing container/network/volume identity. `FOXTUNES_*` settings and internal filenames are retained for compatibility. Keep your current data volume when updating.
 
-Transfer and `skip --device DEVICE_ID --confirm` can interrupt playback. Their results report command acceptance; always observe the result. The local worker never sends mutations automatically or retries queue additions. An accepted or uncertain dispatch blocks another until observed or manually reconciled. `spotify-queue` records `queued-observed` for a uniquely matching accepted request when the active device is stable across the read; this permits dispatching the next request. It does not prove playback.
+## First session
 
-If a request fails or remains uncertain, inspect the actual Spotify queue and current playback. Once reconciled, use:
+1. Start Soloist on the playback device and pair it through Spotify. Confirm audio reaches the stereo.
+2. Open `/host`, sign in with the host password, and authorize Spotify. See the deployment guide for HTTPS login or the HTTP/loopback fallback.
+3. Refresh playback devices and select the Soloist device. Saved location names can be assigned to players for later use.
+4. Request a song if the player has no playback context, then choose **Start session**. UnicornTunes verifies the selected player before enabling request handoff.
+5. Share the guest URL using **Show QR code**, or open `/display` on a shared tablet.
 
-```sh
-python3 foxtunes.py resolve REQUEST_ID --note "What was checked and why it is safe to close"
-```
+**Stop session** stops new request handoffs while the current music continues. **Pause playback** pauses audio and stops handoff. **Skip to next request** respects the protected queue and verifies the resulting playback. Restarting the container preserves data but always leaves handoff stopped until the host starts the session again.
 
-This manually closes the attempt without asserting played/completed. Re-submit only after checking for an existing remote queue entry. An interrupted `dispatching` attempt also requires reconciliation. A 429 error requires waiting; quota exhaustion may last longer than the rate-limit interval. Authentication or device failures require correcting the setup, not repeatedly sending playback commands.
+## Guest experience
 
-## Dedicated player test
+- Search Spotify by general text, title, artist, album, or release year/range, with optional exact-title matching. Exact matching filters each Spotify result page. Results include album, year and duration.
+- Browse House Favorites and playlists enabled by the host, then request individual tracks.
+- Enter a name once; skipping uses `<Shy guy - name not provided>`. Phones remember a private guest identity separately from host authorization.
+- Requests start with the requester's single vote. Additional guests can each vote once. Names appear in request/vote attribution, and your requests are highlighted.
+- View now playing, the shared request queue, a read-only Spotify upcoming snapshot, reactions and Room stats.
 
-Once the existing-device test works, configure [Spotify Soloist](https://developer.spotify.com/documentation/soloist) on a supported audio computer using its separate private API key and the official pairing instructions. Select it in Spotify and repeat `devices`, transfer and the request test above. This harness tests Soloist through the Web API as a Connect target; direct Soloist WebSocket control is not implemented. Download Soloist directly from Spotify; no player binary is bundled here.
+Anonymous identity is device/cookie based, not account authentication. Different devices or cleared cookies create different identities. Identical provided names are combined for the casual user leaderboard.
 
-## Local verification
+## Fair queue
 
-```sh
-python3 -m unittest discover -s tests -v
-```
+Fair mode is enabled by default:
 
-Tests use temporary databases and mocked Spotify transport. They validate persistence, duplicates, credential handling and conservative failure/observation behavior. They do not validate Spotify account access, devices, audio, actual track order, browser isolation, or Docker deployment.
+- Each guest's first request per gathering gets a protected turn.
+- One selected next request cannot be bumped by subsequent votes.
+- Every third selection goes to the oldest waiting request.
+- Other selections prioritize protected first turns, then votes, with arrival order breaking ties.
 
-## Disconnect and data
+The protected item is the next **UnicornTunes request**. Spotify's existing queued tracks can still play ahead of it. Already handed-off and uncertain requests stay locked. **New gathering** archives waiting requests and resets first-turn eligibility and Tonight stats, preserving history. It refuses to reset unresolved handoffs.
 
-`python3 foxtunes.py logout` removes stored local tokens. Revoke UnicornTunes in Spotify account settings to invalidate access fully. Runtime config, tokens, requests and playback observations are stored locally under `.local-work/runtime/`; these contain private account/activity data. Keep the directory out of backups or protect backups appropriately. The CLI binds only its temporary OAuth callback to loopback and serves no guest interface. Do not expose it as a network service.
+## Host-selected playlists
 
-## Browser prototype
+In `/host`, open **Guest playlist selection** to:
 
-Start the web test on the computer where the host Spotify login was saved:
+- Load owned/followed playlists, filter the loaded library by name, and load additional pages.
+- Search Spotify playlists, or preview a playlist by its Spotify URL/ID.
+- Enable individual playlists for guest browsing or disable them later.
+
+Only enabled playlists are exposed through the guest **Playlists** browser. Enabling a private playlist deliberately shares its title and returned tracks with guests. Track pages are paginated and briefly cached across guests. Requests use the same voting, fairness and music rules as song search; browsing never starts a playlist or adds all its tracks.
+
+**Spotify authorization needs `playlist-read-private` and `playlist-read-collaborative` in addition to playback scopes. Existing installations must reconnect Spotify once to grant these read permissions.** Refreshing old tokens does not add permissions. Use **Connect / reconnect Spotify** with trusted HTTPS, or repeat the loopback sign-in in [DEPLOY.md](DEPLOY.md#spotify-login-http--loopback-fallback).
+
+Spotify may restrict reading playlist contents to playlists the connected account owns or collaborates on. Finding or following a playlist does not guarantee its tracks are accessible to this app. UnicornTunes checks contents access before enabling it and displays access failures rather than publishing an unusable selection.
+
+Local-file entries returned by Spotify are visible with a **Local file · Soloist playback not verified** status. They cannot be requested through the existing Spotify-track playback path. This feature does not download playlists, transfer MP3s, or establish native Soloist local-file support.
+
+## Host configuration and room features
+
+- **House Favorites:** curate tracks from host search results; guest browsing is sorted by counted plays. Saved tracks remain marked as favorites in fresh searches.
+- **Music rules:** explicit-content filtering, maximum track length, blocked tracks/artists, and optional repeat cooldown.
+- **Themes:** a theme banner and suggested searches.
+- **Website wording:** customize all five text areas, use suggested presets, hide the intro eyebrow, or restore defaults. Original wording remains the default.
+- **Saved locations:** assign names to playback devices and start/move the shared session there.
+- **Playback health:** handoff state, paused requests/audio, stale observations, unavailable player and host recovery guidance.
+- **Tablet view:** `/display` provides larger touch controls and a persistent join QR. Shared-tablet requests ask for a fresh guest identity; guests can use phones for persistent personal identity.
+- **Room stats:** recent playback observations, Top 40, additional upvotes, distinct supporters, top users, personal history, recap, weekly trends, monthly anthem and discovery spotlight.
+
+A counted play requires 30 observed seconds or half the duration for short tracks. Seeks and unobserved gaps do not earn listening credit. Counted plays do not assert completed or audibly verified listening, and history is not backfilled from before tracking was installed. See **[ROOM_FEATURES.md](ROOM_FEATURES.md)** for the detailed scheduling, identity, observation and rule definitions.
+
+## Data and recovery
+
+SQLite stores requests, votes, guests, playlist selections, favorites and playback history in the persistent volume alongside server configuration. Spotify credentials and the host password are private files there. Protect the volume and its backups.
+
+Run one web server per database. Server restarts expire host sessions but preserve guest identity and stored Spotify authorization. An interrupted Spotify mutation becomes uncertain and requires host reconciliation; UnicornTunes does not blindly retry queue additions. Guest requests are handed off near the current track's end, not with a gapless timing guarantee.
+
+## Development and troubleshooting CLI
+
+The product runs through the Docker web interface. `foxtunes.py` remains an optional OAuth/diagnostic utility, with a separate database for its older CLI request experiments. Do not run its playback experiments against an active web session.
+
+For local source development, use Python 3.9+ (the image uses Python 3.12):
 
 ```sh
 python3 web_server.py
+python3 -m unittest discover -s tests -v
 ```
 
-Open **http://127.0.0.1:8863** for the guest interface. Search songs/artists, page through results, request tracks and vote. Guests have no playback, device-selection or removal permission. One vote per browser session per request; ties keep request order. Each session can have three waiting requests. Sessions expire after eight hours and are not permanent identities; clearing cookies can create a new session, so this is a trusted-party prototype rather than strong abuse prevention.
+The source server binds to `http://127.0.0.1:8863` by default; `/host` is the host desk. It needs configured Spotify credentials for real catalog access. Optional CLI setup/login remains available through `python3 foxtunes.py setup` and `python3 foxtunes.py login`; deployment-side sign-in instructions are in [DEPLOY.md](DEPLOY.md).
 
-Host page: **http://127.0.0.1:8863/host**. The first launch generates a private host password. Read it locally:
-
-```sh
-python3 -c 'import json; print(json.load(open(".local-work/runtime/web-host.json"))["password"])'
-```
-
-Sign in on `/host`. This password protects the host desk; it is separate from Spotify OAuth. Host login does not expose Spotify tokens to the browser. Select the active device and apply settings. Host-only actions include disabling new requests, removing waiting items, pausing/skipping and enabling automatic handoff. Pause/skip turn handoff off. Locked requests cannot be removed from Spotify through this prototype. Reconcile an uncertain/accepted handoff only after checking the actual Spotify queue; it closes the local attempt without asserting completed playback, and stops automatic handoff.
-
-**Handoff defaults OFF on every server start.** To test it, turn off shuffle/repeat in Spotify, start playback on the selected device, select that device in the host desk, check the handoff box and apply. Within the current song's last 15 seconds, UnicornTunes sends one highest-voted waiting request to Spotify. The request locks immediately; the remainder stays local and can be voted up. It sends no additional request until the handed-off track is actually observed playing. Network/API errors or device takeover stop the worker. Uncertain mutations are never automatically retried. The host must reconcile and deliberately re-enable after a failure.
-
-The upcoming panel shows UnicornTunes requests, not every item/context already in Spotify. Existing Spotify queue entries, other clients, gaps in polling, unsupported devices and API quotas can affect order/timing. A 15-second handoff is an experimental threshold, not a gapless-playback guarantee. A track leaving playback is recorded as no longer current, not proof it completed. The service polls Spotify once per 20 seconds while idle and once per 5 seconds during handoff; browser refreshes use the shared cached state. A failure backs off for 60 seconds and disables handoff.
-
-### Phones on the same trusted LAN
-
-Stop the loopback server first. Replace the sample IP with this computer's actual LAN IP:
-
-```sh
-python3 web_server.py --bind 0.0.0.0 --lan-host 192.168.1.50
-```
-
-Phones on the same network open **http://192.168.1.50:8863**. Bind only for a deliberate LAN test; do not forward the port to the internet. Plain HTTP is for the trusted-LAN experiment: host passwords and session traffic are not encrypted. Prefer host sign-in through loopback on the server computer. Guest isolation/router settings may prevent phones from reaching it. HTTPS, PWA installation, QR access, Docker deployment and dedicated-player setup remain separate steps; no public hosting is configured.
-
-The web prototype uses its own `web.sqlite3` so earlier CLI experiments remain intact. Run one server instance per database; in-process session/worker locks are not a multi-process deployment design. Server restarts retain requests/votes but expire browser sessions and disable handoff. Stop with Control-C. Leave the CLI idle while the browser server uses the same Spotify credentials to avoid concurrent refresh operations.
-
-## Starting a dedicated player (v0.1.2+)
-
-On the host desk, select the paired, online Soloist/Connect device and click **Start session**. UnicornTunes transfers playback and verifies the target is playing before enabling request handoff. If the player has no playback context, add a request first; UnicornTunes uses the highest-voted request as its first track. Start also disables shuffle/repeat. **Stop session** stops new handoffs without stopping the audio. **Move / restart session here** starts the selected destination. These controls replace the earlier handoff checkbox and Apply settings workflow described above. No Spotify desktop app is required for normal startup. Live behavior depends on the account's device-control permissions and the player being available; local control is not implemented as a fallback.
-
-## Queue-aware host skip and mobile feedback (v0.1.3+)
-
-**Skip to next request** immediately starts the next UnicornTunes request in vote order. Already-handed-off requests are locked ahead of waiting requests and are advanced to without re-queueing them. With no pending requests, Spotify advances normally. Successful skip preserves a running session; failed or uncertain playback confirmation stops handoff for reconciliation. Guests cannot invoke this action. Mobile shows now playing and coming up before search. Request buttons show Adding… while saving and ✓ Requested after success, with a visible confirmation and an updated queue.
-
-## Share the guest page
-
-The header's **Show QR code** button opens a scannable link to the installation's guest page, using `FOXTUNES_PUBLIC_URL` (for example, `http://unicorntunes.nate/`). It never includes a host session, password, token or `/host` path. QR rendering runs locally using vendored QRCode.js; no external QR service is called. Guest devices must be able to resolve and reach that address. The user interface uses UnicornTunes branding. Legacy file, configuration and Compose identifiers remain for existing-installation compatibility.
-
-## Repository name
-
-Source: [natsteff/unicorntunes](https://github.com/natsteff/unicorntunes). Deployments may use `/opt/unicorntunes`; the Compose project remains explicitly `foxtunes` to preserve existing containers and data. Application settings retain the FOXTUNES_* namespace and the guest URL remains configurable (including unicorntunes.nate). See the directory-rename instructions in [DEPLOY.md](DEPLOY.md).
-
-
-## Room features (v0.2.0)
-
-UnicornTunes now includes returning guest names, request/vote attribution, highlighted personal requests, protected first turns with every-third-oldest scheduling, House Favorites, Room stats/history, host music rules, theme nights, saved playback locations, customizable site copy, playback health and a tablet view at `/display`. The original five text defaults remain unchanged.
-
-See [Room features](ROOM_FEATURES.md) for exact queue rules, play-count definitions, upgrade behavior and limitations. Releases publish both their numbered Docker tag and `latest`.
+Automated tests cover authentication, persistence/migrations, queue fairness, playback failure handling, guest attribution, favorites, stats, host configuration and playlist sharing. Live account permissions, deployed-device behavior and audible playback still require verification on the installation.
