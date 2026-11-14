@@ -14,7 +14,7 @@
 <div class="local-field"><label for="local-host">Playback device hostname or IP</label><input id="local-host" aria-describedby="local-host-help" required maxlength="253"><small id="local-host-help">The device running MPD, separate from the Docker server.</small></div>
 <div class="local-field"><label for="local-user">SSH username</label><input id="local-user" aria-describedby="local-user-help" required maxlength="32"><small id="local-user-help">The audio user that runs Soloist and MPD.</small></div>
 <div class="local-field"><label for="local-port">SSH port</label><input id="local-port" type="number" min="1" max="65535" value="22" required></div>
-<div class="local-field"><label for="local-volume">Local playback volume (0–100)</label><input id="local-volume" aria-describedby="local-volume-help" type="number" min="0" max="100" value="50" required><small id="local-volume-help">Trial volume setting; loudness normalization is pending.</small></div>
+<div class="local-field"><label for="local-volume">Local playback volume (0–100)</label><input id="local-volume" aria-describedby="local-volume-help" type="number" min="0" max="100" value="50" required><small id="local-volume-help">Controls local files only. Raise gradually if they are quieter than Spotify. Loudness matching is still pending.</small><button id="local-volume-apply" type="button" class="secondary">Apply local volume</button></div>
 </div>
 <p class="muted local-binding-note">This connection is linked to the Spotify playback device selected below.</p>
 <div class="local-save-row"><button>Save local connection</button></div>

@@ -6,3 +6,4 @@
 !Dockerfile
 !room.py
 !local_player.py
+!mpd_agent.py

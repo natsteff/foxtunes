@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Restricted SSH command: one bounded JSON request to the loopback MPD instance."""
+import base64
 import hashlib
 import json
 import socket
@@ -31,7 +32,13 @@ class MPD:
             if line=='OK':return rows
             if line.startswith('ACK '):raise ValueError('MPD rejected '+name+': '+line.split('}',1)[-1].strip()[:200])
             if not line:raise ValueError('MPD connection closed')
-            if ': ' in line:rows.append(tuple(line.split(': ',1)))
+            if line.startswith('binary: '):
+                length=int(line.split(': ',1)[1])
+                if not 0 <= length <= 65536:raise ValueError('Artwork chunk too large')
+                chunk=self.file.read(length)
+                if len(chunk)!=length or self.file.read(1)!=b'\n':raise ValueError('Truncated artwork chunk')
+                rows.append(('binary',chunk))
+            elif ': ' in line:rows.append(tuple(line.split(': ',1)))
         raise ValueError('Library response too large')
 
 
@@ -54,18 +61,59 @@ def library(mpd):
     return songs
 
 
+MAX_ART = 2 * 1024 * 1024
+
+
+def picture(mpd, song):
+    data = bytearray()
+    total = None
+    while True:
+        response = dict(mpd.command('readpicture', song['_file'], len(data)))
+        if not response: return {'data':'','type':''}
+        size = int(response.get('size', 0))
+        if not 0 < size <= MAX_ART: raise ValueError('Embedded artwork exceeds the 2 MiB limit')
+        if total is not None and size != total: raise ValueError('Artwork changed while reading')
+        total = size
+        chunk = response.get('binary', b'')
+        if not isinstance(chunk, bytes) or not chunk or len(data) + len(chunk) > total:
+            raise ValueError('Invalid artwork chunk')
+        data.extend(chunk)
+        if len(data) == total: break
+    raw = bytes(data)
+    mime = image_type(raw)
+    if not mime: raise ValueError('Unsupported artwork format; use JPEG, PNG, GIF or WebP')
+    return {'data':base64.b64encode(raw).decode('ascii'), 'type':mime}
+
+
+def image_type(raw):
+    if raw.startswith(b'\xff\xd8\xff'): return 'image/jpeg'
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'): return 'image/png'
+    if raw.startswith((b'GIF87a',b'GIF89a')): return 'image/gif'
+    if raw.startswith(b'RIFF') and raw[8:12] == b'WEBP': return 'image/webp'
+    return ''
+
+
 def execute(mpd,request):
     action=request.get('action')
-    if action not in ('library','status','play','pause','stop','scan'):raise ValueError('Unknown action')
+    if action not in ('library','status','play','pause','stop','scan','picture','volume'):raise ValueError('Unknown action')
     if action=='scan':return {'job':dict(mpd.command('update')).get('updating_db')}
     if action=='library':return {'items':[{k:v for k,v in s.items() if k!='_file'} for s in library(mpd)]}
     if action=='status':
         status=dict(mpd.command('status'));current=dict(mpd.command('currentsong'))
         uri='local:'+hashlib.sha256(current['file'].encode()).hexdigest() if current.get('file') else None
-        return {'state':status.get('state','stop'),'uri':uri,'song_id':status.get('songid'),
+        return {'agent_version':2,'state':status.get('state','stop'),'uri':uri,'song_id':status.get('songid'),
                 'progress_ms':round(float(status.get('elapsed',0))*1000),
                 'duration_ms':round(float(status.get('duration',0))*1000),'volume':status.get('volume'),
                 'error':status.get('error',''),'updating':bool(status.get('updating_db'))}
+    if action=='picture':
+        song=next((s for s in library(mpd) if s['uri']==request.get('uri')),None)
+        if not song:raise ValueError('Local file is not in the scanned library')
+        return picture(mpd,song)
+    if action=='volume':
+        volume=request.get('volume')
+        if type(volume) is not int or not 0<=volume<=100:raise ValueError('Invalid local volume')
+        mpd.command('setvol',volume)
+        return {'volume':int(dict(mpd.command('status')).get('volume',-1))}
     if action=='play':
         uri=request.get('uri');song=next((s for s in library(mpd) if s['uri']==uri),None)
         if not song:raise ValueError('Local file is not in the scanned library')

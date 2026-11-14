@@ -1,8 +1,10 @@
 """Optional local playback provider. No hardcoded player address or shared shell access."""
+import base64
 import json
 import re
 import subprocess
 import time
+import threading
 
 import foxtunes as f
 
@@ -42,7 +44,10 @@ class LocalPlayback:
         self.local_config=f.load(path) if path.exists() else {'enabled':False,'host':'','user':'','port':22,'device':'','volume':50}
         self.local=RemoteMPD(self.data,self.local_config)
         self.db.execute('CREATE TABLE IF NOT EXISTS local_tracks(uri TEXT PRIMARY KEY,metadata TEXT NOT NULL)')
+        self.db.execute('CREATE TABLE IF NOT EXISTS local_art(uri TEXT PRIMARY KEY, mime TEXT, data BLOB, updated REAL)')
         self.db.commit()
+        self.art_lock=threading.Lock()
+        self.art_backoff=0
         self.local_active=self.meta('local_active')
         self.local_error=''
         self.player_missing=False
@@ -63,8 +68,9 @@ class LocalPlayback:
         cleaned=[]
         for song in songs:
             if not isinstance(song,dict) or not LOCAL.fullmatch(str(song.get('uri',''))):raise f.Failure('Invalid local track returned by player.')
-            cleaned.append(dict(song,source='local',url='',art=''))
+            cleaned.append(dict(song,source='local',url='',art='/api/local-art/'+song['uri'][6:]))
         with self.db:
+            self.db.execute('DELETE FROM local_art')
             self.db.execute('DELETE FROM local_tracks')
             self.db.executemany('INSERT INTO local_tracks VALUES(?,?)',[(s['uri'],json.dumps(s)) for s in cleaned])
         self.local_error=''
@@ -93,7 +99,60 @@ class LocalPlayback:
         matches.sort(key=lambda s:(s['name'].casefold(),s['uri']))
         return matches[offset:offset+10],len(matches)>offset+10
 
+    def local_artwork(self, digest):
+        # Artwork SSH work must never hold the playback worker's global lock.
+        with self.art_lock:
+            return self.fetch_local_artwork(digest)
+
+    def fetch_local_artwork(self, digest):
+        from mpd_agent import image_type, MAX_ART
+        uri = 'local:' + digest
+        with self.lock:
+            if not LOCAL.fullmatch(uri) or not self.local_config.get('enabled'):
+                raise LookupError('Local artwork unavailable.')
+            if not self.db.execute('SELECT 1 FROM local_tracks WHERE uri=?',(uri,)).fetchone():
+                raise LookupError('Local file not indexed.')
+            cached = self.db.execute('SELECT * FROM local_art WHERE uri=?',(uri,)).fetchone()
+            if cached and (cached['data'] or time.time()-cached['updated'] < 300):
+                return cached['mime'], bytes(cached['data'])
+            provider = self.local
+        if time.monotonic() < self.art_backoff:
+            raise f.Failure('Local artwork temporarily unavailable. Check or update the player agent.')
+        try: result = provider.call('picture', uri=uri)
+        except f.Failure:
+            self.art_backoff=time.monotonic()+30
+            raise
+        encoded = result.get('data', '')
+        if not isinstance(encoded, str) or len(encoded) > (MAX_ART+2)//3*4:
+            raise f.Failure('Local artwork response is too large.')
+        try: raw = base64.b64decode(encoded, validate=True)
+        except ValueError as error: raise f.Failure('Invalid local artwork response.') from error
+        mime = image_type(raw) if raw else ''
+        if raw and (not mime or len(raw)>MAX_ART): raise f.Failure('Unsupported local artwork.')
+        with self.lock, self.db:
+            size = self.db.execute('SELECT coalesce(sum(length(data)),0) FROM local_art').fetchone()[0]
+            while size + len(raw) > 64*1024*1024:
+                old = self.db.execute('SELECT uri,length(data) FROM local_art ORDER BY updated LIMIT 1').fetchone()
+                if not old: break
+                self.db.execute('DELETE FROM local_art WHERE uri=?',(old[0],));size-=old[1]
+            self.db.execute('INSERT OR REPLACE INTO local_art VALUES(?,?,?,?)',(uri,mime,raw,time.time()))
+        return mime, raw
+
+    def apply_local_volume(self, volume):
+        if type(volume) is not int or not 0 <= volume <= 100:
+            raise f.Failure('Local volume must be a whole number from 0 to 100.')
+        if self.local_active:
+            self.owned_local_status()
+            result = self.local.call('volume', volume=volume)
+            if result.get('volume') != volume: raise f.Failure('MPD did not confirm the requested volume.')
+        config = dict(self.local_config, volume=volume)
+        f.private_write(self.data/'local-player.json', config)
+        self.local_config=config
+        self.local.config=config
+        return {'volume':volume,'live':bool(self.local_active)}
+
     def local_action(self,sid,route,body):
+        if route=='/api/host/local-volume':return self.apply_local_volume(body.get('volume'))
         if route=='/api/host/local-config':
             if self.local_active:raise f.Failure('Stop or finish local playback before changing its connection.')
             config={'enabled':bool(body.get('enabled')),'host':str(body.get('host','')).strip(),

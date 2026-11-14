@@ -80,3 +80,19 @@ Local files use their available tags, with the filename as the title fallback. S
 4. Let the requests run out, then add another local or Spotify request and verify it starts.
 
 The mixed source state machine is covered by automated tests. Audible transitions and volume balance still need validation on your playback hardware.
+
+
+## Embedded artwork and local volume (v0.4.1)
+
+Local covers are read from embedded MP3/other supported file tags via MPD's `readpicture` command. The web app serves them from its own origin and caches up to 64 MiB. JPEG, PNG, GIF and WebP pictures up to 2 MiB per image are supported; missing or unsupported pictures use a music-note placeholder. Re-scan the library after replacing embedded artwork to clear the server cache; a browser image may remain cached for up to five minutes.
+
+This requires an updated restricted agent on the playback device. Run as the existing audio user:
+
+```sh
+curl -fL https://raw.githubusercontent.com/natsteff/unicorntunes/v0.4.1/deploy/update-local-agent.sh -o /tmp/update-unicorntunes-agent.sh
+bash /tmp/update-unicorntunes-agent.sh
+```
+
+The helper validates and atomically replaces only the installed agent; it does not restart MPD/Soloist, change SSH permissions, or start music. Its status output includes `agent_version: 2`. Then update the Docker image and refresh the page. Existing indexed tracks and queued local items can show artwork without being re-requested.
+
+**Apply local volume** saves the chosen MPD level and, when an owned local track is active, applies it immediately after verifying ownership. It does not change Spotify's volume or the amplifier/sink settings. The original trial setting was 50; if local tracks are too quiet, raise the value gradually while listening, for example to 75, then compare with Spotify. This is a manual level adjustment, not per-track loudness normalization. Existing levels are preserved during upgrades; the app never silently raises every local track to maximum.

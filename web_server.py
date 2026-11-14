@@ -544,12 +544,12 @@ def handler(app):
         def log_message(self, *args):
             pass
 
-        def respond(self, code, payload, content='application/json', cookie=None):
+        def respond(self, code, payload, content='application/json', cookie=None, cache='no-store'):
             raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
             self.send_response(code)
             self.send_header('Content-Type', content)
             self.send_header('Content-Length', str(len(raw)))
-            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Cache-Control', cache)
             self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Referrer-Policy', 'no-referrer')
             self.send_header('Content-Security-Policy', "default-src 'self'; img-src 'self' https://i.scdn.co https://mosaic.scdn.co https://image-cdn-ak.spotifycdn.com data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'")
@@ -562,6 +562,15 @@ def handler(app):
 
         def handle_route(self, post=False):
             try:
+                parsed_art = urlsplit(self.path)
+                if not post and parsed_art.path.startswith('/api/local-art/'):
+                    with app.lock:
+                        if self.headers.get('Host', '') not in self.server.allowed_hosts:
+                            raise PermissionError('Unknown host.')
+                        app.limit(('local-art', self.client_address[0]), 180)
+                    mime, raw = app.local_artwork(parsed_art.path[len('/api/local-art/'):])
+                    self.respond(200 if raw else 204, raw, mime or 'application/octet-stream', cache='private, max-age=300')
+                    return
                 with app.lock:
                     host = self.headers.get('Host', '')
                     # Explicit allowed authorities prevent DNS-rebinding requests to arbitrary hosts.
