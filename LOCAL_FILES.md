@@ -84,15 +84,22 @@ The mixed source state machine is covered by automated tests. Audible transition
 
 ## Embedded artwork and local volume (v0.4.1)
 
-Local covers are read from embedded MP3/other supported file tags via MPD's `readpicture` command. The web app serves them from its own origin and caches up to 64 MiB. JPEG, PNG, GIF and WebP pictures up to 2 MiB per image are supported; missing or unsupported pictures use a music-note placeholder. Re-scan the library after replacing embedded artwork to clear the server cache; a browser image may remain cached for up to five minutes.
+Local covers are read from embedded MP3/other supported file tags via MPD's `readpicture` command. The web app serves them from its own origin and caches up to 64 MiB. JPEG, PNG, GIF and WebP pictures up to 16 MiB and 24 megapixels are supported and converted to 320-pixel JPEG thumbnails; missing or unsupported pictures use a music-note placeholder. Re-scan the library after replacing embedded artwork to clear the server cache; a browser image may remain cached for up to five minutes.
 
 This requires an updated restricted agent on the playback device. Run as the existing audio user:
 
 ```sh
-curl -fL https://raw.githubusercontent.com/natsteff/unicorntunes/v0.4.1/deploy/update-local-agent.sh -o /tmp/update-unicorntunes-agent.sh
+curl -fL https://raw.githubusercontent.com/natsteff/unicorntunes/v0.4.2/deploy/update-local-agent.sh -o /tmp/update-unicorntunes-agent.sh
 bash /tmp/update-unicorntunes-agent.sh
 ```
 
-The helper validates and atomically replaces only the installed agent; it does not restart MPD/Soloist, change SSH permissions, or start music. Its status output includes `agent_version: 2`. Then update the Docker image and refresh the page. Existing indexed tracks and queued local items can show artwork without being re-requested.
+The helper validates and atomically replaces only the installed agent; it does not restart MPD/Soloist, change SSH permissions, or start music. Its status output includes `agent_version: 3`. Then update the Docker image and refresh the page. Existing indexed tracks and queued local items can show artwork without being re-requested.
 
 **Apply local volume** saves the chosen MPD level and, when an owned local track is active, applies it immediately after verifying ownership. It does not change Spotify's volume or the amplifier/sink settings. The original trial setting was 50; if local tracks are too quiet, raise the value gradually while listening, for example to 75, then compare with Spotify. This is a manual level adjustment, not per-track loudness normalization. Existing levels are preserved during upgrades; the app never silently raises every local track to maximum.
+
+
+### Artwork size and error isolation (v0.4.2)
+
+The original 2 MiB input limit rejected some larger embedded covers. The agent now accepts up to 16 MiB, and Docker generates small thumbnails without modifying the MP3 or its tags. Resizing runs on Docker, so the Pine64 needs no imaging package. Failures are cached per track; one bad or oversized image no longer blocks other covers. Host users can hover a missing-cover placeholder to see the returned error.
+
+Update both the restricted agent and Docker, then refresh the page. This upgrade clears the old server artwork cache and uses a new image URL version, so old missing-image responses are not reused. Re-scan the library if you later change its embedded covers. If artwork is still missing, inspect that specific track rather than assuming the rest of the library is broken.

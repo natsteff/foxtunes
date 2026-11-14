@@ -1,5 +1,6 @@
 """Optional local playback provider. No hardcoded player address or shared shell access."""
 import base64
+import io
 import json
 import re
 import subprocess
@@ -9,6 +10,28 @@ import threading
 import foxtunes as f
 
 LOCAL=re.compile(r'^local:[a-f0-9]{64}$')
+
+
+def artwork_thumbnail(raw):
+    from PIL import Image, ImageOps, UnidentifiedImageError
+    import warnings
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(raw)) as image:
+                if image.width * image.height > 24_000_000:
+                    raise f.Failure('Cover dimensions exceed the 24 megapixel limit.')
+                image = ImageOps.exif_transpose(image)
+                image.thumbnail((320,320), Image.Resampling.LANCZOS)
+                if image.mode in ('RGBA','LA') or (image.mode=='P' and 'transparency' in image.info):
+                    rgba=image.convert('RGBA')
+                    background=Image.new('RGB',rgba.size,(18,18,18));background.paste(rgba,mask=rgba.getchannel('A'))
+                    image=background
+                else:image=image.convert('RGB')
+                output=io.BytesIO();image.save(output,format='JPEG',quality=85,optimize=True)
+                return 'image/jpeg', output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError, Image.DecompressionBombWarning) as error:
+        raise f.Failure('Embedded cover image could not be decoded safely.') from error
 
 
 class RemoteMPD:
@@ -28,8 +51,8 @@ class RemoteMPD:
                  '-o','ControlMaster=auto','-o','ControlPersist=30','-o','ControlPath=/tmp/unicorntunes-mpd-%C',
                  '-i',str(key),'-p',str(port),user+'@'+host,'unicorntunes-mpd']
         try:
-            result=subprocess.run(command,input=json.dumps(dict(action=action,**args))+'\n',text=True,capture_output=True,timeout=12)
-            if len(result.stdout)>4_000_000:raise f.Failure('Local library response is too large.')
+            result=subprocess.run(command,input=json.dumps(dict(action=action,**args))+'\n',text=True,capture_output=True,timeout=30 if action=='picture' else 12)
+            if len(result.stdout)>24_000_000:raise f.Failure('Local library response is too large.')
             if not result.stdout.strip():raise f.Failure('Local-player SSH connection failed. Check its address, dedicated key and pinned host key.')
             payload=json.loads(result.stdout)
             if result.returncode or payload.get('error'):raise f.Failure('Local player: '+str(payload.get('error','command failed'))[:300],uncertain=action in ('play','pause','stop'))
@@ -46,8 +69,12 @@ class LocalPlayback:
         self.db.execute('CREATE TABLE IF NOT EXISTS local_tracks(uri TEXT PRIMARY KEY,metadata TEXT NOT NULL)')
         self.db.execute('CREATE TABLE IF NOT EXISTS local_art(uri TEXT PRIMARY KEY, mime TEXT, data BLOB, updated REAL)')
         self.db.commit()
+        if self.meta('local_art_cache_version') != 2:
+            self.db.execute('DELETE FROM local_art')
+            self.db.commit()
+            self.set_meta('local_art_cache_version',2)
         self.art_lock=threading.Lock()
-        self.art_backoff=0
+        self.art_errors={}
         self.local_active=self.meta('local_active')
         self.local_error=''
         self.player_missing=False
@@ -71,6 +98,7 @@ class LocalPlayback:
             cleaned.append(dict(song,source='local',url='',art='/api/local-art/'+song['uri'][6:]))
         with self.db:
             self.db.execute('DELETE FROM local_art')
+            self.art_errors.clear()
             self.db.execute('DELETE FROM local_tracks')
             self.db.executemany('INSERT INTO local_tracks VALUES(?,?)',[(s['uri'],json.dumps(s)) for s in cleaned])
         self.local_error=''
@@ -116,11 +144,14 @@ class LocalPlayback:
             if cached and (cached['data'] or time.time()-cached['updated'] < 300):
                 return cached['mime'], bytes(cached['data'])
             provider = self.local
-        if time.monotonic() < self.art_backoff:
-            raise f.Failure('Local artwork temporarily unavailable. Check or update the player agent.')
+        failed = self.art_errors.get(uri)
+        if failed and time.monotonic() < failed[0]:
+            raise f.Failure(failed[1])
         try: result = provider.call('picture', uri=uri)
-        except f.Failure:
-            self.art_backoff=time.monotonic()+30
+        except f.Failure as error:
+            with self.lock:
+                if len(self.art_errors)>=256:self.art_errors.pop(next(iter(self.art_errors)))
+                self.art_errors[uri]=(time.monotonic()+30,str(error))
             raise
         encoded = result.get('data', '')
         if not isinstance(encoded, str) or len(encoded) > (MAX_ART+2)//3*4:
@@ -129,6 +160,9 @@ class LocalPlayback:
         except ValueError as error: raise f.Failure('Invalid local artwork response.') from error
         mime = image_type(raw) if raw else ''
         if raw and (not mime or len(raw)>MAX_ART): raise f.Failure('Unsupported local artwork.')
+        if raw:
+            mime, raw = artwork_thumbnail(raw)
+        self.art_errors.pop(uri, None)
         with self.lock, self.db:
             size = self.db.execute('SELECT coalesce(sum(length(data)),0) FROM local_art').fetchone()[0]
             while size + len(raw) > 64*1024*1024:

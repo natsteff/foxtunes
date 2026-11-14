@@ -128,9 +128,10 @@ Run one web server per database. Server restarts expire host sessions but preser
 
 The product runs through the Docker web interface. `foxtunes.py` remains an optional OAuth/diagnostic utility, with a separate database for its older CLI request experiments. Do not run its playback experiments against an active web session.
 
-For local source development, use Python 3.9+ (the image uses Python 3.12):
+For local source development, use Python 3.11+ (the image uses Python 3.12):
 
 ```sh
+python3 -m pip install -r requirements.txt
 python3 web_server.py
 python3 -m unittest discover -s tests -v
 ```

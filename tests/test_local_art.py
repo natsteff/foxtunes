@@ -9,9 +9,14 @@ from unittest.mock import Mock
 import foxtunes as f
 import mpd_agent
 import web_server as w
+from PIL import Image
+from local_player import artwork_thumbnail
 
 URI='local:'+'a'*64
-IMAGE=b'\xff\xd8\xfftest-jpeg'
+image_buffer=io.BytesIO()
+Image.new('RGB',(16,16),(200,100,50)).save(image_buffer,format='JPEG')
+IMAGE=image_buffer.getvalue()
+THUMBNAIL=artwork_thumbnail(IMAGE)[1]
 
 
 class Duplex:
@@ -55,7 +60,7 @@ class ArtworkTests(unittest.TestCase):
 
     def test_artwork_is_cached_and_magic_validated(self):
         self.app.local.call.return_value={'data':base64.b64encode(IMAGE).decode(),'type':'text/html'}
-        for _ in range(2):self.assertEqual(self.app.local_artwork('a'*64),('image/jpeg',IMAGE))
+        for _ in range(2):self.assertEqual(self.app.local_artwork('a'*64),('image/jpeg',THUMBNAIL))
         self.assertEqual(self.app.local.call.call_count,1)
         with self.assertRaises(LookupError):self.app.local_artwork('../../etc/passwd')
         with self.assertRaises(LookupError):self.app.local_artwork('b'*64)
@@ -103,7 +108,7 @@ class ArtworkTests(unittest.TestCase):
             for _ in range(2):
                 with urllib.request.urlopen(base+'/api/local-art/'+'a'*64) as response:
                     self.assertEqual(response.headers['Content-Type'],'image/jpeg')
-                    self.assertIn('max-age',response.headers['Cache-Control']);self.assertEqual(response.read(),IMAGE)
+                    self.assertIn('max-age',response.headers['Cache-Control']);self.assertEqual(response.read(),THUMBNAIL)
             self.assertEqual(self.app.local.call.call_count,1)
         finally:server.shutdown();server.server_close();thread.join()
 
@@ -121,3 +126,28 @@ class ArtworkTests(unittest.TestCase):
             self.assertTrue(acquired)
             if acquired:self.app.lock.release()
         finally:finish.set();thread.join()
+
+    def test_large_embedded_cover_becomes_small_thumbnail(self):
+        import random
+        raw_pixels=random.Random(42).randbytes(1200*1200*3)
+        image=Image.frombytes('RGB',(1200,1200),raw_pixels)
+        buffer=io.BytesIO();image.save(buffer,format='PNG');original=buffer.getvalue()
+        self.assertGreater(len(original),2*1024*1024)
+        self.app.local.call.return_value={'data':base64.b64encode(original).decode()}
+        mime,thumbnail=self.app.local_artwork('a'*64)
+        self.assertEqual(mime,'image/jpeg');self.assertLess(len(thumbnail),100000)
+        with Image.open(io.BytesIO(thumbnail)) as decoded:self.assertLessEqual(max(decoded.size),320)
+
+    def test_one_failed_cover_does_not_block_another_track(self):
+        other='local:'+'b'*64
+        self.app.db.execute('INSERT INTO local_tracks VALUES(?,?)',(other,json.dumps({'uri':other})));self.app.db.commit()
+        self.app.local.call.side_effect=[f.Failure('Embedded artwork exceeds the limit'),{'data':base64.b64encode(IMAGE).decode()}]
+        with self.assertRaises(f.Failure):self.app.local_artwork('a'*64)
+        self.assertEqual(self.app.local_artwork('b'*64),('image/jpeg',THUMBNAIL))
+        with self.assertRaises(f.Failure):self.app.local_artwork('a'*64)
+        self.assertEqual(self.app.local.call.call_count,2)
+
+    def test_corrupt_image_and_excess_dimensions_are_rejected(self):
+        with self.assertRaises(f.Failure):artwork_thumbnail(b'not-an-image')
+        large=Image.new('1',(6000,5000));buffer=io.BytesIO();large.save(buffer,format='PNG')
+        with self.assertRaises(f.Failure):artwork_thumbnail(buffer.getvalue())

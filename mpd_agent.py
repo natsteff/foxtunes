@@ -61,7 +61,7 @@ def library(mpd):
     return songs
 
 
-MAX_ART = 2 * 1024 * 1024
+MAX_ART = 16 * 1024 * 1024
 
 
 def picture(mpd, song):
@@ -71,7 +71,7 @@ def picture(mpd, song):
         response = dict(mpd.command('readpicture', song['_file'], len(data)))
         if not response: return {'data':'','type':''}
         size = int(response.get('size', 0))
-        if not 0 < size <= MAX_ART: raise ValueError('Embedded artwork exceeds the 2 MiB limit')
+        if not 0 < size <= MAX_ART: raise ValueError('Embedded artwork exceeds the 16 MiB limit')
         if total is not None and size != total: raise ValueError('Artwork changed while reading')
         total = size
         chunk = response.get('binary', b'')
@@ -101,7 +101,7 @@ def execute(mpd,request):
     if action=='status':
         status=dict(mpd.command('status'));current=dict(mpd.command('currentsong'))
         uri='local:'+hashlib.sha256(current['file'].encode()).hexdigest() if current.get('file') else None
-        return {'agent_version':2,'state':status.get('state','stop'),'uri':uri,'song_id':status.get('songid'),
+        return {'agent_version':3,'state':status.get('state','stop'),'uri':uri,'song_id':status.get('songid'),
                 'progress_ms':round(float(status.get('elapsed',0))*1000),
                 'duration_ms':round(float(status.get('duration',0))*1000),'volume':status.get('volume'),
                 'error':status.get('error',''),'updating':bool(status.get('updating_db'))}

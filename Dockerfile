@@ -1,5 +1,7 @@
 FROM python:3.12-slim-bookworm
 WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 FOXTUNES_DATA_DIR=/data FOXTUNES_OAUTH_BIND=0.0.0.0
 RUN apt-get update && apt-get install -y --no-install-recommends openssh-client && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 foxtunes && useradd --uid 10001 --gid 10001 --no-create-home foxtunes && mkdir /data && chown foxtunes:foxtunes /data

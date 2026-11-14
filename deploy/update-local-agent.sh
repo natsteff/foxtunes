@@ -8,7 +8,7 @@ if [ ! -f "$agent_dir/mpd-agent.py" ]; then
 fi
 agent_tmp="$(mktemp "$agent_dir/.mpd-agent.XXXXXX")"
 trap 'rm -f "$agent_tmp"' EXIT
-curl -fL https://raw.githubusercontent.com/natsteff/unicorntunes/v0.4.1/mpd_agent.py -o "$agent_tmp"
+curl -fL https://raw.githubusercontent.com/natsteff/unicorntunes/v0.4.2/mpd_agent.py -o "$agent_tmp"
 python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$agent_tmp"
 chmod 600 "$agent_tmp"
 mv "$agent_tmp" "$agent_dir/mpd-agent.py"
